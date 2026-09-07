@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -17,6 +18,12 @@ import (
 // Reading is demand-driven so that a huge file or an endless stream opens
 // instantly: the loop sleeps until the view asks for rows it does not have.
 type loader struct {
+	// ctx cancels the read loop along with whatever cancelled the command.
+	// A reader already blocked on a stalled pipe is released by Close, which
+	// the caller defers, rather than by cancellation: the read it is parked in
+	// cannot be interrupted without closing the file.
+	ctx context.Context
+
 	wake chan struct{}
 
 	mu     sync.Mutex
@@ -30,8 +37,9 @@ type loader struct {
 	finished  chan struct{} // closed when the reading goroutine exits
 }
 
-func newLoader() *loader {
+func newLoader(ctx context.Context) *loader {
 	return &loader{
+		ctx:      ctx,
 		wake:     make(chan struct{}, 1),
 		stop:     make(chan struct{}),
 		finished: make(chan struct{}),
@@ -79,8 +87,9 @@ func (l *loader) satisfied(loaded int) bool {
 
 // pump runs the read loop on its own goroutine: sleep until woken, then call
 // step until the demand is met. step reports whether reading should carry on,
-// and is responsible for calling finish when it says no.
-func (l *loader) pump(loaded func() int, step func() bool) {
+// and is responsible for calling finish when it says no. finish records why the
+// loading stopped, and pump calls it itself when the context is cancelled.
+func (l *loader) pump(loaded func() int, finish func(error), step func() bool) {
 	defer close(l.finished)
 
 	for {
@@ -88,11 +97,17 @@ func (l *loader) pump(loaded func() int, step func() bool) {
 		case <-l.wake:
 		case <-l.stop:
 			return
+		case <-l.ctx.Done():
+			finish(l.ctx.Err())
+			return
 		}
 
 		for {
 			select {
 			case <-l.stop:
+				return
+			case <-l.ctx.Done():
+				finish(l.ctx.Err())
 				return
 			default:
 			}
@@ -175,7 +190,7 @@ func (c *columns) promote(col int) bool {
 func (c *columns) accumulate(rec arrow.RecordBatch) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for i := 0; i < int(rec.NumCols()) && i < len(c.stats); i++ {
+	for i := range min(int(rec.NumCols()), len(c.stats)) {
 		c.stats[i].Accumulate(rec.Column(i), c.cfg)
 	}
 	c.fmts = nil // sizes may have grown

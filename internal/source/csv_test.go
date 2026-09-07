@@ -1,6 +1,8 @@
 package source
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,7 +23,7 @@ func open(t *testing.T, data string, mut ...func(*CSVOptions)) *CSV {
 	for _, m := range mut {
 		m(&opts)
 	}
-	c, err := OpenCSV(strings.NewReader(data), opts)
+	c, err := OpenCSV(context.Background(), strings.NewReader(data), opts)
 	if err != nil {
 		t.Fatalf("OpenCSV: %v", err)
 	}
@@ -236,7 +238,7 @@ func TestCSVFullMode(t *testing.T) {
 }
 
 func TestCSVEmptyInput(t *testing.T) {
-	if _, err := OpenCSV(strings.NewReader(""), CSVOptions{HasHeader: true}); err == nil {
+	if _, err := OpenCSV(context.Background(), strings.NewReader(""), CSVOptions{HasHeader: true}); err == nil {
 		t.Error("OpenCSV on empty input: want an error")
 	}
 }
@@ -263,7 +265,7 @@ func TestCSVWideningFixture(t *testing.T) {
 	}
 	defer f.Close()
 
-	c, err := OpenCSV(f, CSVOptions{
+	c, err := OpenCSV(context.Background(), f, CSVOptions{
 		Filename:      "widening.csv",
 		HasHeader:     true,
 		SampleSize:    100,
@@ -367,7 +369,7 @@ func TestCSVCloseWhileLoading(t *testing.T) {
 		fmt.Fprintf(&b, "%d\n", i)
 	}
 
-	c, err := OpenCSV(strings.NewReader(b.String()), CSVOptions{
+	c, err := OpenCSV(context.Background(), strings.NewReader(b.String()), CSVOptions{
 		Filename:   "big.csv",
 		HasHeader:  true,
 		SampleSize: 10,
@@ -427,7 +429,7 @@ func openPipe(t *testing.T, mut ...func(*CSVOptions)) (*CSV, *io.PipeWriter) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		c, err := OpenCSV(pr, opts)
+		c, err := OpenCSV(context.Background(), pr, opts)
 		done <- result{c, err}
 	}()
 
@@ -566,7 +568,7 @@ func TestCSVSlowStartKeepsFullSample(t *testing.T) {
 		pw.Close()
 	}()
 
-	c, err := OpenCSV(pr, CSVOptions{
+	c, err := OpenCSV(context.Background(), pr, CSVOptions{
 		Filename:  "slow.csv",
 		HasHeader: true,
 		Config:    format.DefaultConfig(),
@@ -580,5 +582,38 @@ func TestCSVSlowStartKeepsFullSample(t *testing.T) {
 	// batch on -- no promotion needed.
 	if v := c.Value(99, 1); v.Kind != format.KindFloat || v.F != 2.5 {
 		t.Errorf("Value(99,1) = %+v, want float 2.5: the sample was cut short", v)
+	}
+}
+
+// Cancelling the context stops the background reader, so a command that is
+// interrupted does not leave a goroutine ingesting an endless stream.
+func TestCSVContextCancel(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+
+	go func() {
+		fmt.Fprint(pw, "n,x\n")
+		for i := range 100 {
+			fmt.Fprintf(pw, "%d,%d\n", i, i*2)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c, err := OpenCSV(ctx, pr, CSVOptions{HasHeader: true, Config: format.DefaultConfig()})
+	if err != nil {
+		t.Fatalf("OpenCSV: %v", err)
+	}
+	defer c.Close()
+
+	c.RequestAll()
+	cancel()
+
+	select {
+	case <-c.finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelling the context did not stop the reader")
+	}
+	if err := c.Err(); !errors.Is(err, context.Canceled) {
+		t.Errorf("Err() = %v, want context.Canceled", err)
 	}
 }

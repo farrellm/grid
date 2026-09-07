@@ -18,8 +18,8 @@ var timeLayouts = map[string]string{
 
 // TimeFormatter renders timestamps with a fixed layout.
 type TimeFormatter struct {
-	Layout  string
-	NullStr string
+	layout  string
+	nullStr string
 	width   int
 }
 
@@ -37,14 +37,14 @@ func NewTime(spec, nullStr string) *TimeFormatter {
 	if w := textutil.Width(nullStr); w > width {
 		nullStr = textutil.Elide(nullStr, width, "", 1.0)
 	}
-	return &TimeFormatter{Layout: layout, NullStr: nullStr, width: width}
+	return &TimeFormatter{layout: layout, nullStr: nullStr, width: width}
 }
 
 func (f *TimeFormatter) Width() int { return f.width }
 
 func (f *TimeFormatter) Format(v Value) string {
 	if v.Kind != KindTime {
-		return textutil.Pad(f.NullStr, f.width, ' ', true)
+		return textutil.Pad(f.nullStr, f.width, ' ', true)
 	}
-	return textutil.Palide(v.T.Format(f.Layout), f.width, "", ' ', 1.0, false)
+	return textutil.Palide(v.T.Format(f.layout), f.width, "", ' ', 1.0, false)
 }

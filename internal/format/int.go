@@ -11,8 +11,8 @@ import (
 // IntFormatter renders integers right-aligned in a fixed number of digits.
 type IntFormatter struct {
 	size  int
-	Pad   rune   // ' ' or '0'
-	Sign  string // "-", "+", or "" for none
+	pad   rune   // ' ' or '0'
+	sign  string // "-", "+", or "" for none
 	width int
 }
 
@@ -22,14 +22,14 @@ func NewInt(size int, pad rune, sign string) *IntFormatter {
 	if sign == "-" || sign == "+" {
 		width++
 	}
-	return &IntFormatter{size: size, Pad: pad, Sign: sign, width: width}
+	return &IntFormatter{size: size, pad: pad, sign: sign, width: width}
 }
 
 func (f *IntFormatter) Width() int { return f.width }
 func (f *IntFormatter) Size() int  { return f.size }
 
 func (f *IntFormatter) WithSize(size int) Formatter {
-	return NewInt(size, f.Pad, f.Sign)
+	return NewInt(size, f.pad, f.sign)
 }
 
 func (f *IntFormatter) Format(v Value) string {
@@ -41,17 +41,17 @@ func (f *IntFormatter) Format(v Value) string {
 	if !ok {
 		return hashes(f.width)
 	}
-	if len(digits) > f.size || (neg && f.Sign == "") {
+	if len(digits) > f.size || (neg && f.sign == "") {
 		return hashes(f.width)
 	}
 
-	sign := signOf(neg, f.Sign)
-	if f.Pad == ' ' {
+	sign := signOf(neg, f.sign)
+	if f.pad == ' ' {
 		// Space padding precedes the sign.
 		return textutil.Pad(sign+digits, f.size+len(sign), ' ', true)
 	}
 	// Zero padding follows the sign.
-	return sign + textutil.Pad(digits, f.size, f.Pad, true)
+	return sign + textutil.Pad(digits, f.size, f.pad, true)
 }
 
 // digits returns the sign and decimal magnitude of v. Values are rendered as a

@@ -10,16 +10,16 @@ import (
 // StrFormatter renders strings elided and padded to a fixed width.
 type StrFormatter struct {
 	size     int
-	Ellipsis string
-	Pad      rune
-	Position float64
-	PadLeft  bool
+	ellipsis string
+	pad      rune
+	position float64
+	padLeft  bool
 }
 
 // NewStr creates a formatter that fits strings into size display columns.
 func NewStr(size int, ellipsis string, pad rune, position float64, padLeft bool) *StrFormatter {
 	return &StrFormatter{
-		size: size, Ellipsis: ellipsis, Pad: pad, Position: position, PadLeft: padLeft,
+		size: size, ellipsis: ellipsis, pad: pad, position: position, padLeft: padLeft,
 	}
 }
 
@@ -27,14 +27,14 @@ func (f *StrFormatter) Width() int { return f.size }
 func (f *StrFormatter) Size() int  { return f.size }
 
 func (f *StrFormatter) WithSize(size int) Formatter {
-	return NewStr(size, f.Ellipsis, f.Pad, f.Position, f.PadLeft)
+	return NewStr(size, f.ellipsis, f.pad, f.position, f.padLeft)
 }
 
 func (f *StrFormatter) Format(v Value) string {
 	return textutil.Palide(
 		f.text(v), f.size,
-		textutil.Elide(f.Ellipsis, f.size, "", 1.0),
-		f.Pad, f.Position, f.PadLeft)
+		textutil.Elide(f.ellipsis, f.size, "", 1.0),
+		f.pad, f.position, f.padLeft)
 }
 
 // text renders any value kind as a string, so a string column can still show

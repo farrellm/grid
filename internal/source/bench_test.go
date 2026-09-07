@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func genCSV(rows int) string {
 // loadCSV opens a source and reads it to completion.
 func loadCSV(tb testing.TB, data string) *CSV {
 	tb.Helper()
-	c, err := OpenCSV(strings.NewReader(data), CSVOptions{
+	c, err := OpenCSV(context.Background(), strings.NewReader(data), CSVOptions{
 		Filename:  "bench.csv",
 		HasHeader: true,
 		Config:    format.DefaultConfig(),
@@ -59,7 +60,7 @@ func BenchmarkOpenCSVFull(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 
 	for b.Loop() {
-		c, err := OpenCSV(strings.NewReader(data), CSVOptions{
+		c, err := OpenCSV(context.Background(), strings.NewReader(data), CSVOptions{
 			Filename:  "bench.csv",
 			HasHeader: true,
 			Config:    format.DefaultConfig(),

@@ -45,7 +45,7 @@ func buildRecord(mem memory.Allocator, schema *arrow.Schema, rows [][]string, nu
 
 	ncols := len(schema.Fields())
 	for _, row := range rows {
-		for c := 0; c < ncols; c++ {
+		for c := range ncols {
 			var cell string
 			if c < len(row) {
 				cell = row[c]

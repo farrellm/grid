@@ -38,9 +38,10 @@ type Parquet struct {
 	names  []string
 }
 
-// OpenParquet opens a Parquet file for reading. Closing the source closes r if
-// it is an io.Closer, which file.Reader.Close does for us.
-func OpenParquet(r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error) {
+// OpenParquet opens a Parquet file for reading. Cancelling ctx stops the
+// background reading. Closing the source closes r if it is an io.Closer, which
+// file.Reader.Close does for us.
+func OpenParquet(ctx context.Context, r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error) {
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = DefaultChunkSize
 	}
@@ -65,7 +66,7 @@ func OpenParquet(r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error
 		return nil, fmt.Errorf("reading parquet schema: %w", err)
 	}
 
-	rr, err := fr.GetRecordReader(context.Background(), nil, nil)
+	rr, err := fr.GetRecordReader(ctx, nil, nil)
 	if err != nil {
 		pf.Close()
 		return nil, fmt.Errorf("reading parquet: %w", err)
@@ -78,7 +79,7 @@ func OpenParquet(r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error
 
 	p := &Parquet{
 		store:   newStore(),
-		loader:  newLoader(),
+		loader:  newLoader(ctx),
 		columns: newColumns(sch, opts.Config),
 		opts:    opts,
 		reader:  rr,
@@ -86,7 +87,7 @@ func OpenParquet(r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error
 		names:   names,
 	}
 
-	go p.pump(p.NumRows, p.step)
+	go p.pump(p.NumRows, p.finish, p.step)
 
 	// Load one batch up front so the view has something to size itself from.
 	p.Request(int(opts.BatchSize))

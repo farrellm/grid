@@ -59,7 +59,9 @@ func newCommand(o *options) *cobra.Command {
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(cmd, args, o)
+			// fang.Execute passes the context main supplies down to here, so
+			// cancelling it reaches the background readers.
+			return run(cmd.Context(), cmd, args, o)
 		},
 	}
 
@@ -185,7 +187,7 @@ func expandHome(dir string) string {
 	return dir
 }
 
-func run(cmd *cobra.Command, args []string, o *options) error {
+func run(ctx context.Context, cmd *cobra.Command, args []string, o *options) error {
 	cfg := format.DefaultConfig()
 
 	var path string
@@ -205,7 +207,7 @@ func run(cmd *cobra.Command, args []string, o *options) error {
 		return cmd.Help()
 	}
 
-	src, err := openSource(path, o, cfg)
+	src, err := openSource(ctx, path, o, cfg)
 	if err != nil {
 		return err
 	}
@@ -234,7 +236,7 @@ func run(cmd *cobra.Command, args []string, o *options) error {
 }
 
 // openSource picks a reader for the input and starts it loading.
-func openSource(path string, o *options, cfg format.Config) (source.Source, error) {
+func openSource(ctx context.Context, path string, o *options, cfg format.Config) (source.Source, error) {
 	if isParquet(path, o.fileFormat) {
 		if path == "" {
 			return nil, errors.New("parquet input must be a file: it cannot be read from a pipe")
@@ -243,7 +245,7 @@ func openSource(path string, o *options, cfg format.Config) (source.Source, erro
 		if err != nil {
 			return nil, err
 		}
-		return source.OpenParquet(f, source.ParquetOptions{
+		return source.OpenParquet(ctx, f, source.ParquetOptions{
 			Filename: path,
 			Config:   cfg,
 			Full:     o.full,
@@ -269,7 +271,7 @@ func openSource(path string, o *options, cfg format.Config) (source.Source, erro
 		return nil, err
 	}
 
-	return source.OpenCSV(r, source.CSVOptions{
+	return source.OpenCSV(ctx, r, source.CSVOptions{
 		Filename:      name,
 		HasHeader:     !o.noHeader,
 		SampleSize:    o.bufferSize,

@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,7 +77,7 @@ func openParquet(t *testing.T, path string, full bool) *Parquet {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := OpenParquet(f, ParquetOptions{
+	p, err := OpenParquet(context.Background(), f, ParquetOptions{
 		Filename: path,
 		Config:   format.DefaultConfig(),
 		Full:     full,
@@ -150,7 +151,7 @@ func TestParquetRejectsNonParquet(t *testing.T) {
 	}
 	defer f.Close()
 
-	if _, err := OpenParquet(f, ParquetOptions{Filename: path}); err == nil {
+	if _, err := OpenParquet(context.Background(), f, ParquetOptions{Filename: path}); err == nil {
 		t.Error("OpenParquet on a CSV file: want an error")
 	}
 }

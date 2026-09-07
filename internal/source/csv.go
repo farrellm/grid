@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -73,8 +74,9 @@ type CSV struct {
 }
 
 // OpenCSV samples the head of r to sniff the delimiter and infer column types,
-// then begins loading the rest in the background.
-func OpenCSV(r io.Reader, opts CSVOptions) (*CSV, error) {
+// then begins loading the rest in the background. Cancelling ctx stops that
+// background reading.
+func OpenCSV(ctx context.Context, r io.Reader, opts CSVOptions) (*CSV, error) {
 	if opts.SampleSize <= 0 {
 		opts.SampleSize = 100
 	}
@@ -87,7 +89,7 @@ func OpenCSV(r io.Reader, opts CSVOptions) (*CSV, error) {
 
 	c := &CSV{
 		store:  newStore(),
-		loader: newLoader(),
+		loader: newLoader(ctx),
 		opts:   opts,
 		mem:    memory.NewGoAllocator(),
 		lines:  newLineReader(r, opts.CommentPrefix),
@@ -104,7 +106,7 @@ func OpenCSV(r io.Reader, opts CSVOptions) (*CSV, error) {
 		return nil, err
 	}
 
-	go c.pump(c.NumRows, c.step)
+	go c.pump(c.NumRows, c.finish, c.step)
 
 	if opts.Full {
 		// Reading everything up front lets column widths and precision be

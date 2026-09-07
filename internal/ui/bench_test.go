@@ -71,7 +71,7 @@ func BenchmarkView(b *testing.B) {
 func BenchmarkViewCursor(b *testing.B) {
 	m := newModel(b, benchCSV(2000, 20), 200, 50)
 	m.showCursor = true
-	m.cursor[0], m.cursor[1] = 10, 5
+	m.cursor = cell{row: 10, col: 5}
 	benchView(b, m)
 }
 

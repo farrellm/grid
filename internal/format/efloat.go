@@ -13,11 +13,11 @@ import (
 type EFloatFormatter struct {
 	size      int // digits in the exponent
 	precision int // digits after the point; NoPrecision suppresses it
-	Sign      string
-	Point     string
-	Exp       string
-	NaNStr    string
-	InfStr    string
+	sign      string
+	point     string
+	exp       string
+	nanStr    string
+	infStr    string
 	width     int
 }
 
@@ -27,14 +27,14 @@ func NewEFloat(size, precision int, sign, point, exp, nanStr, infStr string) *EF
 	if precision != NoPrecision {
 		width += len(point) + precision
 	}
-	nanStr = truncate(nanStr, width)
-	infStr = truncate(infStr, width)
+	nanStr = truncateBytes(nanStr, width)
+	infStr = truncateBytes(infStr, width)
 	if sign == "-" || sign == "+" {
 		width++
 	}
 	return &EFloatFormatter{
-		size: size, precision: precision, Sign: sign, Point: point,
-		Exp: exp, NaNStr: nanStr, InfStr: infStr, width: width,
+		size: size, precision: precision, sign: sign, point: point,
+		exp: exp, nanStr: nanStr, infStr: infStr, width: width,
 	}
 }
 
@@ -43,28 +43,28 @@ func (f *EFloatFormatter) Size() int      { return f.size }
 func (f *EFloatFormatter) Precision() int { return f.precision }
 
 func (f *EFloatFormatter) WithSize(size int) Formatter {
-	return NewEFloat(size, f.precision, f.Sign, f.Point, f.Exp, f.NaNStr, f.InfStr)
+	return NewEFloat(size, f.precision, f.sign, f.point, f.exp, f.nanStr, f.infStr)
 }
 
 func (f *EFloatFormatter) WithPrecision(precision int) Formatter {
-	return NewEFloat(f.size, precision, f.Sign, f.Point, f.Exp, f.NaNStr, f.InfStr)
+	return NewEFloat(f.size, precision, f.sign, f.point, f.exp, f.nanStr, f.infStr)
 }
 
 func (f *EFloatFormatter) Format(v Value) string {
 	if v.IsNull() {
-		return textutil.Pad(f.NaNStr, f.width, ' ', true)
+		return textutil.Pad(f.nanStr, f.width, ' ', true)
 	}
 	x := v.Number()
 	neg := x < 0
-	sign := signOf(neg, f.Sign)
+	sign := signOf(neg, f.sign)
 
 	switch {
 	case math.IsNaN(x):
-		return textutil.Pad(f.NaNStr, f.width, ' ', true)
-	case neg && f.Sign == "":
+		return textutil.Pad(f.nanStr, f.width, ' ', true)
+	case neg && f.sign == "":
 		return hashes(f.width)
 	case math.IsInf(x, 0):
-		return textutil.Pad(sign+f.InfStr, f.width, ' ', true)
+		return textutil.Pad(sign+f.infStr, f.width, ' ', true)
 	}
 
 	// 'e' formatting rounds the mantissa and carries into the exponent for us
@@ -103,10 +103,10 @@ func (f *EFloatFormatter) Format(v Value) string {
 	b.WriteString(sign)
 	b.WriteString(intPart)
 	if f.precision != NoPrecision {
-		b.WriteString(f.Point)
+		b.WriteString(f.point)
 		b.WriteString(fracPart)
 	}
-	b.WriteString(f.Exp)
+	b.WriteString(f.exp)
 	b.WriteString(expSign)
 	b.WriteString(textutil.Pad(absExp, f.size, '0', true))
 	return b.String()
