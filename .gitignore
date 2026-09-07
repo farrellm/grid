@@ -34,3 +34,7 @@ go.work.sum
 # Build output
 /grid
 coverage.out
+
+# Benchmark output
+bench.old
+bench.new

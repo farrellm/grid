@@ -52,6 +52,21 @@ test: ## run the tests
 race: ## run the tests under the race detector
 	go test -race ./...
 
+.PHONY: bench
+bench: ## run the benchmarks
+	go test -run '^$$' -bench . -benchmem ./...
+
+.PHONY: benchstat
+benchstat: ## compare bench.old against bench.new (see `make bench-new`)
+	benchstat bench.old bench.new
+
+.PHONY: bench-old bench-new
+bench-old: ## record a benchmark baseline in bench.old
+	go test -run '^$$' -bench . -benchmem -count=10 ./... > bench.old
+bench-new: ## record benchmark results in bench.new, then compare
+	go test -run '^$$' -bench . -benchmem -count=10 ./... > bench.new
+	$(MAKE) benchstat
+
 .PHONY: cover
 cover: ## run the tests and open a coverage report
 	go test -coverprofile=coverage.out ./...

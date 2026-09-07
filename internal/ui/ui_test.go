@@ -12,9 +12,10 @@ import (
 	"github.com/farrellm/grid/internal/source"
 )
 
-// newModel builds a model over real CSV data at a fixed terminal size.
-func newModel(t *testing.T, data string, w, h int) *Model {
-	t.Helper()
+// newModel builds a model over real CSV data at a fixed terminal size. It takes
+// a testing.TB so the benchmarks can share it.
+func newModel(tb testing.TB, data string, w, h int) *Model {
+	tb.Helper()
 
 	src, err := source.OpenCSV(strings.NewReader(data), source.CSVOptions{
 		Filename:  "t.csv",
@@ -22,21 +23,16 @@ func newModel(t *testing.T, data string, w, h int) *Model {
 		Config:    format.DefaultConfig(),
 	})
 	if err != nil {
-		t.Fatalf("OpenCSV: %v", err)
+		tb.Fatalf("OpenCSV: %v", err)
 	}
-	t.Cleanup(func() { src.Close() })
+	tb.Cleanup(func() { src.Close() })
 
 	src.RequestAll()
-	select {
-	case <-src.Ready():
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out loading")
-	}
 	for !src.Done() {
 		select {
 		case <-src.Ready():
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out loading")
+		case <-time.After(30 * time.Second):
+			tb.Fatal("timed out loading")
 		}
 	}
 
