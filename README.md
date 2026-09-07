@@ -23,6 +23,26 @@ Or from a checkout, which stamps the version from git:
 make install
 ```
 
+### Shell completion
+
+`grid` generates its own completion script:
+
+```
+grid completion bash > ~/.local/share/bash-completion/completions/grid
+grid completion zsh  > "${fpath[1]}/_grid"
+grid completion fish > ~/.config/fish/completions/grid.fish
+```
+
+Those are the per-user directories, picked up in the next shell with no
+further setup. For everyone on the machine, write the bash script to
+`/etc/bash_completion.d/grid` instead, as root.
+
+Once it is installed, `grid <TAB>` completes directories and the files grid can
+read — `.csv`, `.tsv`, `.txt` and `.parquet` — and `--format` and `--delimiter`
+complete their values. grid builds the candidates itself rather than asking the
+shell to filter by extension, so bash, zsh and fish all behave the same, and
+bash does not need the `bash-completion` package.
+
 ## Use
 
 ```
