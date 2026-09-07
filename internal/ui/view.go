@@ -190,7 +190,11 @@ func (m *Model) statusText() string {
 		// A '+' means more rows exist but have not been read, as in ngrid.
 		status += "+"
 	}
-	if m.loading && !m.src.Done() {
+	if m.following && !m.src.Done() {
+		// Following is a mode the user is in, so it is named rather than
+		// described as activity; it subsumes the loading note.
+		status += " FOLLOW"
+	} else if m.loading && !m.src.Done() {
 		status += " loading…"
 	}
 	if err := m.src.Err(); err != nil {

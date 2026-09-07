@@ -23,6 +23,7 @@ type keyMap struct {
 	Origin   key.Binding
 	End      key.Binding
 	LastRead key.Binding
+	Follow   key.Binding
 
 	ToggleCursor key.Binding
 	CycleSep     key.Binding
@@ -60,6 +61,9 @@ func defaultKeyMap() keyMap {
 		Origin:   key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "first row and column")),
 		End:      key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "last row of file")),
 		LastRead: key.NewBinding(key.WithKeys("end"), key.WithHelp("END", "last row read so far")),
+		// less spells this F; that is already the footer toggle here, so the
+		// lowercase letter carries it.
+		Follow: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "follow rows as they arrive")),
 
 		ToggleCursor: key.NewBinding(key.WithKeys("~", "insert"), key.WithHelp("~, INSERT", "toggle cursor")),
 		CycleSep:     key.NewBinding(key.WithKeys("|"), key.WithHelp("|", "cycle column separator")),
@@ -93,7 +97,7 @@ func (k keyMap) sections() []helpSection {
 		{"", []key.Binding{k.Help, k.Quit}},
 		{"MOVING", []key.Binding{
 			k.Down, k.Up, k.PageDown, k.PageUp, k.HalfDown, k.HalfUp,
-			k.Left, k.Right, k.Top, k.Origin, k.End, k.LastRead,
+			k.Left, k.Right, k.Top, k.Origin, k.End, k.LastRead, k.Follow,
 		}},
 		{"CURSOR & DISPLAY", []key.Binding{
 			k.CycleSep, k.ToggleHeader, k.ToggleFooter, k.ToggleCursor,

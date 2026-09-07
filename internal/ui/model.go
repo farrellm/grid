@@ -59,11 +59,18 @@ type Model struct {
 	// input loads. ngrid's 'G' read the whole file synchronously and then
 	// jumped; loading in the background means the target moves as rows arrive.
 	followEnd bool
+	// following is follow mode, which 'f' holds open over a live stream. It is
+	// distinct from followEnd, the pin: 'G' pins the view to the end of a file
+	// it is still loading, which any keystroke releases while the load carries
+	// on. Follow instead keeps the source reading, so leaving it has to stop
+	// that read as well -- and, as in less, any key leaves it.
+	following bool
 	quit      bool
 }
 
-// New creates a model over src.
-func New(src source.Source, cfg format.Config, numFrozen int) *Model {
+// New creates a model over src. follow starts the view in follow mode, for
+// --follow on a live stream.
+func New(src source.Source, cfg format.Config, numFrozen int, follow bool) *Model {
 	in := textinput.New()
 	in.Prompt = "/"
 	in.CharLimit = 256
@@ -83,7 +90,24 @@ func New(src source.Source, cfg format.Config, numFrozen int) *Model {
 	}
 	m.refreshFormatters()
 	m.setGeometry()
+	if follow {
+		m.setFollow(true)
+	}
 	return m
+}
+
+// setFollow enters or leaves follow mode. Following pins the view to the last
+// row and keeps the source reading; leaving it stops that read, so a stream
+// that never ends is not ingested for ever once the user has looked away.
+func (m *Model) setFollow(on bool) {
+	m.following = on
+	m.followEnd = on
+	m.loading = on
+	if on {
+		m.src.RequestAll()
+	} else {
+		m.src.StopAll()
+	}
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -114,6 +138,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampToLoaded()
 		if m.src.Done() {
 			m.loading = false
+			m.following = false
 			m.followEnd = false
 			return m, nil
 		}
@@ -137,9 +162,17 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Any keystroke clears the previous message, so it stays readable through
 	// the repaints that background loading causes, and stops any seek to the
-	// end that is still in progress.
+	// end that is still in progress. Any key also leaves follow mode, which
+	// stops the read that follow started; a 'G' seek is only unpinned, so a
+	// large file it is still loading carries on loading. Whether follow was on
+	// is remembered so that its own key can toggle against what the user could
+	// see rather than against the clear below.
+	wasFollowing := m.following
 	m.flash = ""
 	m.followEnd = false
+	if m.following {
+		m.setFollow(false)
+	}
 
 	k := m.keys
 	switch {
@@ -175,10 +208,27 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.moveTo(m.src.NumRows() - m.numRows)
 	case key.Matches(msg, k.End):
 		// Jumping to the true end means reading the rest of the input, which
-		// happens in the background; follow it down as rows arrive.
+		// happens in the background; follow it down as rows arrive. This is a
+		// seek rather than follow mode: the next keystroke releases the pin but
+		// leaves the input loading.
 		m.loading = !m.src.Done()
 		m.followEnd = !m.src.Done()
 		m.src.RequestAll()
+		m.moveTo(m.src.NumRows() - m.numRows)
+	case key.Matches(msg, k.Follow):
+		// Unlike 'G', this is a mode the user holds: on a stream that never
+		// ends there is no last row to arrive at, so following is the state
+		// rather than a means of getting somewhere.
+		if wasFollowing {
+			// The clear above has already left follow mode.
+			m.flash = "follow off"
+			break
+		}
+		if m.src.Done() {
+			m.flash = "no more rows to follow"
+			break
+		}
+		m.setFollow(true)
 		m.moveTo(m.src.NumRows() - m.numRows)
 
 	case key.Matches(msg, k.ToggleCursor):

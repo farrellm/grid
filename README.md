@@ -49,6 +49,7 @@ bash does not need the `bash-completion` package.
 grid data.csv           # a delimited file
 grid data.parquet       # a Parquet file
 psql -c '...' | grid    # anything on standard input
+grid -                  # standard input, named explicitly
 grid --full data.csv    # read it all first, for the best column sizing
 ```
 
@@ -57,6 +58,25 @@ immediately. The row count in the status bar ends in `+` while more data is
 still waiting to be read.
 
 Press `h` for help while running, and `q` to quit.
+
+### Live streams
+
+A pipe displays as it arrives rather than only once it has produced enough to
+fill a buffer, so a slow or endless producer is as usable as a file:
+
+```
+tail -f events.csv | grid
+kubectl logs -f pod | grid --follow
+```
+
+Press `f` to follow: the view pins itself to the last row and keeps up as rows
+land, and the status bar reads `FOLLOW`. Press `f` again to stop following and
+leave the stream where it is. `--follow` starts that way.
+
+Column types are inferred from a sample of the first rows, and a stream that
+cannot supply a full sample quickly is typed from what it has sent so far. A
+column that later turns out to be wider than its sample suggested is widened in
+place, so a surprising value never breaks the display.
 
 ### Flags
 
@@ -81,6 +101,7 @@ Press `h` for help while running, and `q` to quit.
 | `g` `HOME` | First row |
 | `G` | Last row of the file |
 | `END` | Last row read so far |
+| `f` | Follow new rows as they arrive |
 | `P` | First row and column |
 | `~` `INSERT` | Toggle the cell cursor |
 | `,` `.` | Narrow / widen the column at the cursor |

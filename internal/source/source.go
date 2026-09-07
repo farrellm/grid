@@ -40,6 +40,8 @@ type Source interface {
 	Request(n int)
 	// RequestAll asks for every remaining row.
 	RequestAll()
+	// StopAll cancels a RequestAll, returning to demand-driven reading.
+	StopAll()
 	// SetFormatter overrides one column's formatter.
 	SetFormatter(col int, f format.Formatter)
 	// Ready returns a channel that receives whenever new rows land.
