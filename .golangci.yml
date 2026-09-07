@@ -16,6 +16,8 @@ linters:
     - bodyclose
     - nilerr
     - unconvert
+    # No context stored in a struct: the read loop takes one as a parameter.
+    - containedctx
 
   settings:
     revive:

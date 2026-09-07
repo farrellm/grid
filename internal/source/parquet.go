@@ -81,7 +81,7 @@ func OpenParquet(ctx context.Context, r parquet.ReaderAtSeeker, opts ParquetOpti
 
 	p := &Parquet{
 		store:   newStore(),
-		loader:  newLoader(ctx),
+		loader:  newLoader(),
 		columns: newColumns(sch, opts.Config),
 		opts:    opts,
 		reader:  rr,
@@ -89,7 +89,7 @@ func OpenParquet(ctx context.Context, r parquet.ReaderAtSeeker, opts ParquetOpti
 		names:   names,
 	}
 
-	go p.pump(p.NumRows, p.finish, p.step)
+	go p.pump(ctx, p.NumRows, p.finish, p.step)
 
 	// Load one batch up front so the view has something to size itself from.
 	p.Request(int(opts.BatchSize))

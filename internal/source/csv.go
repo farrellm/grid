@@ -89,7 +89,7 @@ func OpenCSV(ctx context.Context, r io.Reader, opts CSVOptions) (*CSV, error) {
 
 	c := &CSV{
 		store:  newStore(),
-		loader: newLoader(ctx),
+		loader: newLoader(),
 		opts:   opts,
 		mem:    memory.NewGoAllocator(),
 		lines:  newLineReader(r, opts.CommentPrefix),
@@ -106,7 +106,7 @@ func OpenCSV(ctx context.Context, r io.Reader, opts CSVOptions) (*CSV, error) {
 		return nil, err
 	}
 
-	go c.pump(c.NumRows, c.finish, c.step)
+	go c.pump(ctx, c.NumRows, c.finish, c.step)
 
 	if opts.Full {
 		// Reading everything up front lets column widths and precision be
