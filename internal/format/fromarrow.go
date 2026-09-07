@@ -7,33 +7,29 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
-// Accumulate folds one Arrow array into the column's statistics.
-func (s *ColumnStats) Accumulate(arr arrow.Array, cfg Config) {
-	if arr == nil {
-		return
+// FromArrow converts one element of an Arrow array into a Value. It is the
+// single decoding path: the view renders what it returns and the column
+// statistics are gathered from it, so a column can never be sized from one
+// reading of a cell and displayed from another.
+//
+// A nil array, an out-of-range index and a null element all yield a null Value,
+// so callers need no bounds check of their own.
+func FromArrow(arr arrow.Array, i int) Value {
+	if arr == nil || i < 0 || i >= arr.Len() || arr.IsNull(i) {
+		return Null()
 	}
-	for i := 0; i < arr.Len(); i++ {
-		if arr.IsNull(i) {
-			s.AddNull()
-			continue
-		}
-		switch v := valueOf(arr, i); v.Kind {
-		case KindString:
-			s.AddString(v.S)
-		case KindTime:
-			s.Count++
-		case KindBool:
-			s.Count++
-		default:
-			s.AddNumber(v.Number(), cfg)
-		}
-	}
-}
-
-// valueOf is the subset of Arrow decoding that statistics need; the source
-// package holds the full conversion used for rendering.
-func valueOf(arr arrow.Array, i int) Value {
+	// The cases are ordered by how often they come up rather than by width. A
+	// type switch over concrete types lowers to a chain of comparisons, so the
+	// order is the cost: text, doubles and 64-bit integers are what schema
+	// inference produces for delimited input and what most Parquet files hold,
+	// and this runs once per cell rendered.
 	switch a := arr.(type) {
+	case *array.String:
+		return String(a.Value(i))
+	case *array.Float64:
+		return Float(a.Value(i))
+	case *array.Int64:
+		return Int(a.Value(i))
 	case *array.Boolean:
 		return Bool(a.Value(i))
 	case *array.Int8:
@@ -42,8 +38,6 @@ func valueOf(arr arrow.Array, i int) Value {
 		return Int(int64(a.Value(i)))
 	case *array.Int32:
 		return Int(int64(a.Value(i)))
-	case *array.Int64:
-		return Int(a.Value(i))
 	case *array.Uint8:
 		return Int(int64(a.Value(i)))
 	case *array.Uint16:
@@ -52,16 +46,84 @@ func valueOf(arr arrow.Array, i int) Value {
 		return Int(int64(a.Value(i)))
 	case *array.Uint64:
 		return Int(int64(a.Value(i)))
+	case *array.Float16:
+		return Float(float64(a.Value(i).Float32()))
 	case *array.Float32:
 		return Float(float64(a.Value(i)))
-	case *array.Float64:
-		return Float(a.Value(i))
-	case *array.String:
-		return String(a.Value(i))
 	case *array.LargeString:
 		return String(a.Value(i))
+	case *array.Binary:
+		return String(string(a.Value(i)))
+	case *array.Date32:
+		return Time(a.Value(i).ToTime())
+	case *array.Date64:
+		return Time(a.Value(i).ToTime())
+	case *array.Timestamp:
+		unit := arrow.Microsecond
+		if tt, ok := a.DataType().(*arrow.TimestampType); ok {
+			unit = tt.Unit
+		}
+		return Time(a.Value(i).ToTime(unit))
+	case *array.Time32:
+		unit := arrow.Second
+		if tt, ok := a.DataType().(*arrow.Time32Type); ok {
+			unit = tt.Unit
+		}
+		return Time(a.Value(i).ToTime(unit))
+	case *array.Time64:
+		unit := arrow.Microsecond
+		if tt, ok := a.DataType().(*arrow.Time64Type); ok {
+			unit = tt.Unit
+		}
+		return Time(a.Value(i).ToTime(unit))
 	default:
 		return String(arr.ValueStr(i))
+	}
+}
+
+// Accumulate folds one Arrow array into the column's statistics.
+//
+// Every element of an Arrow array has the same type, so the two that dominate
+// real tables are dispatched once here rather than once per cell. The general
+// path below decides the same thing per element and gives the same answer; it
+// is what every other type takes.
+func (s *ColumnStats) Accumulate(arr arrow.Array, cfg Config) {
+	if arr == nil {
+		return
+	}
+	switch a := arr.(type) {
+	case *array.String:
+		for i := range a.Len() {
+			if a.IsNull(i) {
+				s.AddNull()
+			} else {
+				s.AddString(a.Value(i))
+			}
+		}
+		return
+
+	case *array.Float64:
+		for i := range a.Len() {
+			if a.IsNull(i) {
+				s.AddNull()
+			} else {
+				s.AddNumber(a.Value(i), cfg)
+			}
+		}
+		return
+	}
+
+	for i := range arr.Len() {
+		switch v := FromArrow(arr, i); v.Kind {
+		case KindNull:
+			s.AddNull()
+		case KindString:
+			s.AddString(v.S)
+		case KindTime, KindBool:
+			s.Count++
+		default:
+			s.AddNumber(v.Number(), cfg)
+		}
 	}
 }
 
@@ -89,7 +151,7 @@ func DefaultFormatter(dt arrow.DataType, s *ColumnStats, cfg Config) Formatter {
 		return NewTime("time", cfg.NaNString)
 
 	default:
-		width := clamp(cfg.StrWidthMin, s.MaxStrWidth, cfg.StrWidthMax)
+		width := min(max(s.MaxStrWidth, cfg.StrWidthMin), cfg.StrWidthMax)
 		return NewStr(width, cfg.Ellipsis, ' ', 1.0, false)
 	}
 }

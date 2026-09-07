@@ -15,6 +15,12 @@ import (
 	"github.com/farrellm/grid/internal/source"
 )
 
+// cell names a position in the grid. It replaces a [2]int, where the two
+// indices were only distinguished by convention.
+type cell struct {
+	row, col int
+}
+
 // mode is which input the keyboard is driving.
 type mode int
 
@@ -43,7 +49,7 @@ type Model struct {
 	numFrozen  int
 	numRows    int // data rows that fit on screen
 
-	cursor     [2]int // row, column
+	cursor     cell
 	showCursor bool
 
 	fmts       []format.Formatter
@@ -295,7 +301,7 @@ func (m *Model) setGeometry() {
 func (m *Model) lastCol() int {
 	sep := len(m.cfg.Separator)
 	x := 0
-	for c := 0; c < m.numFrozen && c < len(m.fmts); c++ {
+	for c := range min(m.numFrozen, len(m.fmts)) {
 		x += m.fmts[c].Width() + sep
 	}
 	for c := m.col0; c < m.src.NumCols(); c++ {
@@ -322,8 +328,8 @@ func (m *Model) move(dr, dc int) {
 		return
 	}
 
-	r := clamp(0, m.cursor[0]+dr, m.maxRow())
-	c := clamp(0, m.cursor[1]+dc, m.src.NumCols()-1)
+	r := clamp(0, m.cursor.row+dr, m.maxRow())
+	c := clamp(0, m.cursor.col+dc, m.src.NumCols()-1)
 
 	if r < m.idx0 {
 		m.moveBy(r - m.idx0)
@@ -336,7 +342,7 @@ func (m *Model) move(dr, dc int) {
 	for m.lastCol() < c && m.col0 < m.src.NumCols()-1 {
 		m.moveToCol(m.col0 + 1)
 	}
-	m.cursor[0], m.cursor[1] = r, c
+	m.cursor = cell{row: r, col: c}
 }
 
 func (m *Model) maxRow() int { return max(m.src.NumRows()-1, 0) }
@@ -345,7 +351,7 @@ func (m *Model) moveTo(row int) {
 	m.idx0 = max(0, row)
 	m.idx1 = m.idx0 + m.numRows
 	m.clampToLoaded()
-	m.cursor[0] = clamp(m.idx0, m.cursor[0], max(m.idx1-1, m.idx0))
+	m.cursor.row = clamp(m.idx0, m.cursor.row, max(m.idx1-1, m.idx0))
 }
 
 func (m *Model) moveBy(rows int) { m.moveTo(m.idx0 + rows) }
@@ -367,12 +373,12 @@ func (m *Model) clampToLoaded() {
 	if m.idx1 > n {
 		m.idx1 = n
 	}
-	m.cursor[0] = clamp(0, m.cursor[0], m.maxRow())
+	m.cursor.row = clamp(0, m.cursor.row, m.maxRow())
 }
 
 func (m *Model) moveToCol(col int) {
 	m.col0 = clamp(m.numFrozen, col, max(m.src.NumCols()-1, m.numFrozen))
-	m.cursor[1] = clamp(m.col0, m.cursor[1], m.lastCol())
+	m.cursor.col = clamp(m.col0, m.cursor.col, m.lastCol())
 }
 
 func (m *Model) cycleSeparator() {
@@ -392,7 +398,7 @@ func (m *Model) changeSize(d int) {
 	if !m.showCursor {
 		return
 	}
-	col := m.cursor[1]
+	col := m.cursor.col
 	if col >= len(m.fmts) {
 		return
 	}
@@ -408,7 +414,7 @@ func (m *Model) changePrecision(d int) {
 	if !m.showCursor {
 		return
 	}
-	col := m.cursor[1]
+	col := m.cursor.col
 	if col >= len(m.fmts) {
 		return
 	}
@@ -450,6 +456,9 @@ func (m *Model) refreshFormatters() {
 	}
 }
 
+// clamp is not min(max(v, lo), hi): an empty range, where hi < lo, collapses to
+// lo rather than to hi. moveToCol and move rely on that, since a table narrower
+// than the frozen columns leaves them with no scrolling column to land on.
 func clamp(lo, v, hi int) int {
 	if hi < lo {
 		return lo

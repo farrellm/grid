@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test -race ./...
+
+      # Only on the architecture the committed fixtures were generated on.
+      # gen.go feeds math.Exp into math.Exp, and Go does not promise math.Exp
+      # is bit-identical across architectures, so the largest exponentials
+      # differ in their last digits between amd64 and arm64. That is a property
+      # of the fixtures, not something for CI to police.
+      - name: fixtures are reproducible
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go run testdata/gen.go
+          git diff --exit-code -- testdata
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          # Keep in step with GOLANGCI_VERSION in the Makefile.
+          version: v2.13.2
+
+  bench:
+    # Shared runners cannot give stable timings, so this only proves the
+    # benchmarks still build and run. Compare them locally with make bench-new.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -run '^$' -bench . -benchtime=1x ./...

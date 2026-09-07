@@ -31,7 +31,7 @@ func (m *Model) View() tea.View {
 		if rows >= m.height {
 			break
 		}
-		b.WriteString(truncateToWidth(line, m.width))
+		b.WriteString(clip(line, m.width))
 		b.WriteByte('\n')
 		rows++
 	}
@@ -60,7 +60,7 @@ func (m *Model) View() tea.View {
 func (m *Model) visibleColumns() []int {
 	n := m.src.NumCols()
 	cols := make([]int, 0, n)
-	for c := 0; c < m.numFrozen && c < n; c++ {
+	for c := range min(m.numFrozen, n) {
 		cols = append(cols, c)
 	}
 	for c := max(m.col0, m.numFrozen); c < n; c++ {
@@ -81,7 +81,7 @@ func (m *Model) writeHeader(b *strings.Builder) {
 			// Header names elide near the right but keep their tail, so
 			// similar prefixes stay distinguishable.
 			text := textutil.Palide(name, w, m.ellipsisFor(w), ' ', 0.7, true)
-			return text, m.pal.header(c < m.numFrozen, m.showCursor && c == m.cursor[1])
+			return text, m.pal.header(c < m.numFrozen, m.showCursor && c == m.cursor.col)
 		},
 		func(int) cellStyle { return m.pal.separator })
 }
@@ -101,12 +101,12 @@ func (m *Model) writeRow(b *strings.Builder, idx int) {
 			default:
 				text = strings.Repeat(" ", m.fmts[c].Width())
 			}
-			atCursor := m.showCursor && (idx == m.cursor[0] || c == m.cursor[1])
-			atSelect := m.showCursor && idx == m.cursor[0] && c == m.cursor[1]
+			atCursor := m.showCursor && (idx == m.cursor.row || c == m.cursor.col)
+			atSelect := m.showCursor && idx == m.cursor.row && c == m.cursor.col
 			return text, m.pal.cell(c < m.numFrozen, atCursor, atSelect)
 		},
 		func(int) cellStyle {
-			if m.showCursor && idx == m.cursor[0] {
+			if m.showCursor && idx == m.cursor.row {
 				return m.pal.cursor
 			}
 			return m.pal.separator
@@ -138,7 +138,7 @@ func (m *Model) writeCells(b *strings.Builder, render func(int) (string, cellSty
 
 func (m *Model) writeFooter(b *strings.Builder) {
 	if m.mode == modeSearch {
-		b.WriteString(truncateToWidth(m.input.View(), m.width))
+		b.WriteString(clip(m.input.View(), m.width))
 		return
 	}
 
@@ -147,8 +147,8 @@ func (m *Model) writeFooter(b *strings.Builder) {
 	// The cell under the cursor is shown in full at the right, since the grid
 	// may have elided it.
 	value := ""
-	if m.showCursor && m.cursor[0] < m.src.NumRows() && m.cursor[1] < m.src.NumCols() {
-		raw := m.fmts[m.cursor[1]].Format(m.src.Value(m.cursor[0], m.cursor[1]))
+	if m.showCursor && m.cursor.row < m.src.NumRows() && m.cursor.col < m.src.NumCols() {
+		raw := m.fmts[m.cursor.col].Format(m.src.Value(m.cursor.row, m.cursor.col))
 		room := m.width - textutil.Width(status) - 4
 		if room > 0 {
 			value = textutil.Elide(strings.TrimSpace(raw), room, m.cfg.Ellipsis, 1.0)
@@ -160,7 +160,7 @@ func (m *Model) writeFooter(b *strings.Builder) {
 		gap = 1
 	}
 	line := status + strings.Repeat(" ", gap) + value
-	m.pal.footer.write(b, truncateToWidth(line, m.width))
+	m.pal.footer.write(b, clip(line, m.width))
 }
 
 func (m *Model) statusText() string {
@@ -220,5 +220,3 @@ func clip(s string, width int) string {
 	}
 	return ansi.Truncate(s, width, "")
 }
-
-func truncateToWidth(s string, width int) string { return clip(s, width) }

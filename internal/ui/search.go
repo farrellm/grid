@@ -129,10 +129,10 @@ func (m *Model) findFrom(start, dir int, toCol bool) {
 
 		if col, ok := m.matchRow(row, dir); ok {
 			m.moveTo(row)
-			m.cursor[0] = row
+			m.cursor.row = row
 			if toCol {
 				m.moveToCol(col)
-				m.cursor[1] = col
+				m.cursor.col = col
 			}
 			m.showCursor = true // so the match is visible
 			m.flash = ""
@@ -154,7 +154,7 @@ func (m *Model) matchRow(row, dir int) (int, bool) {
 	}
 
 	if dir >= 0 {
-		for c := 0; c < ncols; c++ {
+		for c := range ncols {
 			if scan(c) {
 				return c, true
 			}

@@ -53,9 +53,10 @@ func signOf(neg bool, sign string) string {
 	}
 }
 
-// truncate cuts s to at most n bytes, as Python's slicing does for the NaN and
-// infinity placeholders.
-func truncate(s string, n int) string {
+// truncateBytes cuts s to at most n bytes, as Python's slicing does for the NaN
+// and infinity placeholders. It is bytes rather than display columns on purpose,
+// which is why it is not one of textutil's helpers.
+func truncateBytes(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}

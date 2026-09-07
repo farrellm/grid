@@ -52,6 +52,21 @@ test: ## run the tests
 race: ## run the tests under the race detector
 	go test -race ./...
 
+.PHONY: bench
+bench: ## run the benchmarks
+	go test -run '^$$' -bench . -benchmem ./...
+
+.PHONY: benchstat
+benchstat: ## compare bench.old against bench.new (see `make bench-new`)
+	benchstat bench.old bench.new
+
+.PHONY: bench-old bench-new
+bench-old: ## record a benchmark baseline in bench.old
+	go test -run '^$$' -bench . -benchmem -count=10 ./... > bench.old
+bench-new: ## record benchmark results in bench.new, then compare
+	go test -run '^$$' -bench . -benchmem -count=10 ./... > bench.new
+	$(MAKE) benchstat
+
 .PHONY: cover
 cover: ## run the tests and open a coverage report
 	go test -coverprofile=coverage.out ./...
@@ -65,14 +80,29 @@ fmt: ## format the source
 vet: ## run go vet
 	go vet ./...
 
+# The linter version CI uses. Pinned so a new release cannot fail the build
+# without the pin being updated deliberately.
+GOLANGCI_VERSION := v2.13.2
+GOLANGCI := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+
+.PHONY: lint
+lint: ## run golangci-lint (see .golangci.yml)
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run; \
+	else \
+		echo "golangci-lint not on PATH; running $(GOLANGCI_VERSION) with go run"; \
+		go run $(GOLANGCI) run; \
+	fi
+
 .PHONY: tidy
 tidy: ## tidy go.mod and go.sum
 	go mod tidy
 
 .PHONY: check
-check: ## everything CI should run: format check, vet, race tests
+check: ## everything CI runs: format check, vet, lint, race tests
 	@test -z "$$(gofmt -l .)" || { echo "unformatted files:"; gofmt -l .; exit 1; }
 	go vet ./...
+	$(MAKE) lint
 	go test -race ./...
 
 .PHONY: fixtures

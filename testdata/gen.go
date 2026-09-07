@@ -64,7 +64,7 @@ func main() {
 	rb := array.NewRecordBuilder(mem, sch)
 	defer rb.Release()
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		f0, f1 := r.Intn(2) == 0, r.Intn(2) == 0
 		nm0, nm1 := r.NormFloat64(), r.NormFloat64()
 		e0 := math.Exp(r.Float64() * 20)
@@ -113,7 +113,7 @@ func main() {
 	var wide strings.Builder
 	wide.WriteString("# grid test fixture\n# second comment line\n")
 	wide.WriteString("n,mixed,late,text\n")
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		mixed, late := fmt.Sprint(i), fmt.Sprint(i)
 		if i == 400 {
 			mixed = "1.5" // int column widens to float, past the sample
