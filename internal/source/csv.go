@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/farrellm/grid/internal/format"
 	"github.com/farrellm/grid/internal/schema"
@@ -64,31 +61,15 @@ type CSVOptions struct {
 
 // CSV is a delimited-text source that loads incrementally on its own goroutine.
 type CSV struct {
-	*store
+	*store   // the loaded batches
+	*loader  // the demand-driven read loop
+	*columns // the schema, statistics and formatters
 
 	opts   CSVOptions
 	mem    memory.Allocator
 	lines  *lineReader
 	titles []string
 	names  []string
-
-	// schema and formatters change when a column is promoted, so both are
-	// guarded.
-	smu    sync.RWMutex
-	schema *arrow.Schema
-	stats  []*format.ColumnStats
-	fmts   []format.Formatter
-
-	wake   chan struct{}
-	tmu    sync.Mutex
-	target int
-
-	closeOnce sync.Once
-	stop      chan struct{} // closed by Close to request shutdown
-	finished  chan struct{} // closed when the reader goroutine exits
-
-	// all requests every remaining row, avoiding an overflowing row target.
-	all atomic.Bool
 }
 
 // OpenCSV samples the head of r to sniff the delimiter and infer column types,
@@ -105,29 +86,25 @@ func OpenCSV(r io.Reader, opts CSVOptions) (*CSV, error) {
 	}
 
 	c := &CSV{
-		store:    newStore(),
-		opts:     opts,
-		mem:      memory.NewGoAllocator(),
-		lines:    newLineReader(r, opts.CommentPrefix),
-		wake:     make(chan struct{}, 1),
-		stop:     make(chan struct{}),
-		finished: make(chan struct{}),
+		store:  newStore(),
+		loader: newLoader(),
+		opts:   opts,
+		mem:    memory.NewGoAllocator(),
+		lines:  newLineReader(r, opts.CommentPrefix),
 	}
 
 	sample, err := c.readSample()
 	if err != nil {
 		return nil, err
 	}
-	if err := c.inferFrom(sample); err != nil {
-		return nil, err
-	}
+	c.inferFrom(sample)
 
 	// The sample rows are data too; seed the store with them.
 	if err := c.ingest(sample.Rows); err != nil {
 		return nil, err
 	}
 
-	go c.run()
+	go c.pump(c.NumRows, c.step)
 
 	if opts.Full {
 		// Reading everything up front lets column widths and precision be
@@ -192,19 +169,11 @@ func (c *CSV) readSample() (*schema.Sample, error) {
 	return s, nil
 }
 
-func (c *CSV) inferFrom(s *schema.Sample) error {
+func (c *CSV) inferFrom(s *schema.Sample) {
 	c.opts.Delimiter = s.Delimiter
 	c.names = s.Names
 	c.titles = s.Comments
-
-	c.smu.Lock()
-	defer c.smu.Unlock()
-	c.schema = schema.Infer(s, c.opts.NullValues)
-	c.stats = make([]*format.ColumnStats, len(c.names))
-	for i := range c.stats {
-		c.stats[i] = &format.ColumnStats{}
-	}
-	return nil
+	c.columns = newColumns(schema.Infer(s, c.opts.NullValues), c.opts.Config)
 }
 
 // ingest converts rows into a record batch, widening column types and retrying
@@ -215,11 +184,7 @@ func (c *CSV) ingest(rows [][]string) error {
 		return nil
 	}
 	for {
-		c.smu.RLock()
-		sch := c.schema
-		c.smu.RUnlock()
-
-		rec, err := buildRecord(c.mem, sch, rows, c.opts.NullValues)
+		rec, err := buildRecord(c.mem, c.currentSchema(), rows, c.opts.NullValues)
 		if err == nil {
 			c.accumulate(rec)
 			c.append(rec)
@@ -238,76 +203,24 @@ func (c *CSV) ingest(rows [][]string) error {
 	}
 }
 
-// promote widens one column and discards the formatters derived from the old
-// type. It reports false when no further widening is possible.
-func (c *CSV) promote(col int) bool {
-	c.smu.Lock()
-	defer c.smu.Unlock()
-
-	next, ok := schema.PromoteSchema(c.schema, col)
-	if !ok {
+// step reads one chunk for the loader, reporting whether to carry on.
+func (c *CSV) step() bool {
+	res, err := c.readChunk()
+	if err != nil {
+		c.finish(err)
 		return false
 	}
-	c.schema = next
-	// Statistics gathered under the narrower type no longer describe the
-	// column; start it over.
-	c.stats[col] = &format.ColumnStats{}
-	c.fmts = nil
+	switch res {
+	case chunkEOF:
+		c.finish(nil)
+		return false
+	case chunkIdle:
+		// The producer has paused with the pipe still open. Block for the next
+		// line rather than spinning on it or mistaking the pause for the end of
+		// the input.
+		c.lines.wait()
+	}
 	return true
-}
-
-// accumulate folds a batch into the per-column statistics that size formatters.
-func (c *CSV) accumulate(rec arrow.RecordBatch) {
-	c.smu.Lock()
-	defer c.smu.Unlock()
-	for i := 0; i < int(rec.NumCols()) && i < len(c.stats); i++ {
-		c.stats[i].Accumulate(rec.Column(i), c.opts.Config)
-	}
-	c.fmts = nil // sizes may have grown
-}
-
-// run loads batches until the requested row count is met, then sleeps.
-func (c *CSV) run() {
-	defer close(c.finished)
-
-	for {
-		select {
-		case <-c.wake:
-		case <-c.stop:
-			return
-		}
-
-		for {
-			select {
-			case <-c.stop:
-				return
-			default:
-			}
-
-			c.tmu.Lock()
-			target := c.target
-			c.tmu.Unlock()
-
-			if !c.all.Load() && c.NumRows() >= target+readAhead {
-				break
-			}
-			res, err := c.readChunk()
-			if err != nil {
-				c.finish(err)
-				return
-			}
-			switch res {
-			case chunkEOF:
-				c.finish(nil)
-				return
-			case chunkIdle:
-				// The producer has paused with the pipe still open. Block for
-				// the next line rather than spinning on it or mistaking the
-				// pause for the end of the input.
-				c.lines.wait()
-			}
-		}
-	}
 }
 
 // readChunk reads up to ChunkSize rows and adds them to the store, settling for
@@ -363,74 +276,15 @@ func (c *CSV) readChunk() (chunkResult, error) {
 	return chunkRows, nil
 }
 
-// Request asks that at least n rows be loaded and returns immediately.
-func (c *CSV) Request(n int) {
-	c.tmu.Lock()
-	if n > c.target {
-		c.target = n
-	}
-	c.tmu.Unlock()
-	c.poke()
-}
-
-// RequestAll asks for every remaining row, as the 'G' key does.
-func (c *CSV) RequestAll() {
-	c.all.Store(true)
-	c.poke()
-}
-
-// StopAll cancels a RequestAll, returning to demand-driven reading. Leaving
-// follow mode uses it so a live stream is not ingested for ever.
-func (c *CSV) StopAll() { c.all.Store(false) }
-
-func (c *CSV) poke() {
-	select {
-	case c.wake <- struct{}{}:
-	default: // a wakeup is already pending
-	}
-}
-
 func (c *CSV) Names() []string      { return c.names }
 func (c *CSV) NumCols() int         { return len(c.names) }
 func (c *CSV) Filename() string     { return c.opts.Filename }
 func (c *CSV) TitleLines() []string { return c.titles }
 
-// Formatters returns one formatter per column, rebuilt whenever the statistics
-// or column types have changed.
-func (c *CSV) Formatters() []format.Formatter {
-	c.smu.Lock()
-	defer c.smu.Unlock()
-
-	if c.fmts != nil {
-		return c.fmts
-	}
-	fields := c.schema.Fields()
-	c.fmts = make([]format.Formatter, len(fields))
-	for i, f := range fields {
-		c.fmts[i] = format.DefaultFormatter(f.Type, c.stats[i], c.opts.Config)
-	}
-	return c.fmts
-}
-
-// SetFormatter replaces one column's formatter, for interactive width and
-// precision changes.
-func (c *CSV) SetFormatter(col int, f format.Formatter) {
-	c.smu.Lock()
-	defer c.smu.Unlock()
-	if c.fmts == nil || col < 0 || col >= len(c.fmts) {
-		return
-	}
-	c.fmts[col] = f
-}
-
 func (c *CSV) Close() error {
-	c.closeOnce.Do(func() {
-		close(c.stop)
-		// Release the reader if it is parked waiting on a stream that has gone
-		// quiet, so waiting for it below cannot deadlock.
-		c.lines.close()
-		<-c.finished // let the reader drop its reference to the batches
-	})
+	// The reader may be parked waiting on a stream that has gone quiet, so it
+	// is released before the wait for it.
+	c.shutdown(c.lines.close)
 	c.release()
 	return nil
 }

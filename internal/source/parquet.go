@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
-	"sync/atomic"
 
-	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/file"
@@ -31,28 +28,14 @@ type ParquetOptions struct {
 // the file states its schema. It also needs random access, so unlike CSV it
 // cannot be read from a pipe.
 type Parquet struct {
-	*store
+	*store   // the loaded batches
+	*loader  // the demand-driven read loop
+	*columns // the schema, statistics and formatters
 
 	opts   ParquetOptions
-	mem    memory.Allocator
 	reader pqarrow.RecordReader
 	pq     *file.Reader
-
-	schema *arrow.Schema
 	names  []string
-
-	smu   sync.Mutex
-	stats []*format.ColumnStats
-	fmts  []format.Formatter
-
-	wake   chan struct{}
-	tmu    sync.Mutex
-	target int
-	all    atomic.Bool
-
-	closeOnce sync.Once
-	stop      chan struct{}
-	finished  chan struct{}
 }
 
 // OpenParquet opens a Parquet file for reading. Closing the source closes r if
@@ -94,23 +77,16 @@ func OpenParquet(r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error
 	}
 
 	p := &Parquet{
-		store:    newStore(),
-		opts:     opts,
-		mem:      mem,
-		reader:   rr,
-		pq:       pf,
-		schema:   sch,
-		names:    names,
-		stats:    make([]*format.ColumnStats, len(names)),
-		wake:     make(chan struct{}, 1),
-		stop:     make(chan struct{}),
-		finished: make(chan struct{}),
-	}
-	for i := range p.stats {
-		p.stats[i] = &format.ColumnStats{}
+		store:   newStore(),
+		loader:  newLoader(),
+		columns: newColumns(sch, opts.Config),
+		opts:    opts,
+		reader:  rr,
+		pq:      pf,
+		names:   names,
 	}
 
-	go p.run()
+	go p.pump(p.NumRows, p.step)
 
 	// Load one batch up front so the view has something to size itself from.
 	p.Request(int(opts.BatchSize))
@@ -121,78 +97,22 @@ func OpenParquet(r parquet.ReaderAtSeeker, opts ParquetOptions) (*Parquet, error
 	return p, nil
 }
 
-func (p *Parquet) run() {
-	defer close(p.finished)
-
-	for {
-		select {
-		case <-p.wake:
-		case <-p.stop:
-			return
+// step reads one record batch for the loader, reporting whether to carry on.
+// Unlike the CSV source there is no idle case: a file always has a next batch
+// or an end.
+func (p *Parquet) step() bool {
+	if !p.reader.Next() {
+		if err := p.reader.Err(); err != nil && !errors.Is(err, io.EOF) {
+			p.finish(err)
+		} else {
+			p.finish(nil)
 		}
-
-		for {
-			select {
-			case <-p.stop:
-				return
-			default:
-			}
-
-			p.tmu.Lock()
-			target := p.target
-			p.tmu.Unlock()
-
-			if !p.all.Load() && p.NumRows() >= target+readAhead {
-				break
-			}
-			if !p.reader.Next() {
-				if err := p.reader.Err(); err != nil && !errors.Is(err, io.EOF) {
-					p.finish(err)
-				} else {
-					p.finish(nil)
-				}
-				return
-			}
-			rec := p.reader.RecordBatch()
-			p.accumulate(rec)
-			p.append(rec)
-		}
+		return false
 	}
-}
-
-func (p *Parquet) accumulate(rec arrow.RecordBatch) {
-	p.smu.Lock()
-	defer p.smu.Unlock()
-	for i := 0; i < int(rec.NumCols()) && i < len(p.stats); i++ {
-		p.stats[i].Accumulate(rec.Column(i), p.opts.Config)
-	}
-	p.fmts = nil
-}
-
-// Request asks that at least n rows be loaded and returns immediately.
-func (p *Parquet) Request(n int) {
-	p.tmu.Lock()
-	if n > p.target {
-		p.target = n
-	}
-	p.tmu.Unlock()
-	p.poke()
-}
-
-// RequestAll asks for every remaining row.
-func (p *Parquet) RequestAll() {
-	p.all.Store(true)
-	p.poke()
-}
-
-// StopAll cancels a RequestAll, returning to demand-driven reading.
-func (p *Parquet) StopAll() { p.all.Store(false) }
-
-func (p *Parquet) poke() {
-	select {
-	case p.wake <- struct{}{}:
-	default:
-	}
+	rec := p.reader.RecordBatch()
+	p.accumulate(rec)
+	p.append(rec)
+	return true
 }
 
 func (p *Parquet) Names() []string      { return p.names }
@@ -200,35 +120,8 @@ func (p *Parquet) NumCols() int         { return len(p.names) }
 func (p *Parquet) Filename() string     { return p.opts.Filename }
 func (p *Parquet) TitleLines() []string { return nil }
 
-func (p *Parquet) Formatters() []format.Formatter {
-	p.smu.Lock()
-	defer p.smu.Unlock()
-
-	if p.fmts != nil {
-		return p.fmts
-	}
-	fields := p.schema.Fields()
-	p.fmts = make([]format.Formatter, len(fields))
-	for i, f := range fields {
-		p.fmts[i] = format.DefaultFormatter(f.Type, p.stats[i], p.opts.Config)
-	}
-	return p.fmts
-}
-
-func (p *Parquet) SetFormatter(col int, f format.Formatter) {
-	p.smu.Lock()
-	defer p.smu.Unlock()
-	if p.fmts == nil || col < 0 || col >= len(p.fmts) {
-		return
-	}
-	p.fmts[col] = f
-}
-
 func (p *Parquet) Close() error {
-	p.closeOnce.Do(func() {
-		close(p.stop)
-		<-p.finished
-	})
+	p.shutdown(nil)
 	p.release()
 	p.reader.Release()
 	return p.pq.Close()
