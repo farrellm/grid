@@ -80,13 +80,19 @@ fmt: ## format the source
 vet: ## run go vet
 	go vet ./...
 
+# The linter version CI uses. Pinned so a new release cannot fail the build
+# without the pin being updated deliberately.
+GOLANGCI_VERSION := v2.13.2
+GOLANGCI := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+
 .PHONY: lint
 lint: ## run golangci-lint (see .golangci.yml)
-	@command -v golangci-lint >/dev/null 2>&1 || { \
-		echo "golangci-lint is not installed; get it with"; \
-		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
-		exit 1; }
-	golangci-lint run
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run; \
+	else \
+		echo "golangci-lint not on PATH; running $(GOLANGCI_VERSION) with go run"; \
+		go run $(GOLANGCI) run; \
+	fi
 
 .PHONY: tidy
 tidy: ## tidy go.mod and go.sum

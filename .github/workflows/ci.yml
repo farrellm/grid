@@ -56,7 +56,8 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # Keep in step with GOLANGCI_VERSION in the Makefile.
+          version: v2.13.2
 
   bench:
     # Shared runners cannot give stable timings, so this only proves the
