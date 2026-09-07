@@ -41,7 +41,13 @@ jobs:
       - name: test
         run: go test -race ./...
 
+      # Only on the architecture the committed fixtures were generated on.
+      # gen.go feeds math.Exp into math.Exp, and Go does not promise math.Exp
+      # is bit-identical across architectures, so the largest exponentials
+      # differ in their last digits between amd64 and arm64. That is a property
+      # of the fixtures, not something for CI to police.
       - name: fixtures are reproducible
+        if: matrix.os == 'ubuntu-latest'
         run: |
           go run testdata/gen.go
           git diff --exit-code -- testdata
