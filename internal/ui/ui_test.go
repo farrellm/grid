@@ -40,7 +40,7 @@ func newModel(t *testing.T, data string, w, h int) *Model {
 		}
 	}
 
-	m := New(src, format.DefaultConfig(), 1)
+	m := New(src, format.DefaultConfig(), 1, false)
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m.refreshFormatters()
 	return m
@@ -296,7 +296,7 @@ func TestTitleLinesRender(t *testing.T) {
 	}
 	defer src.Close()
 
-	m := New(src, format.DefaultConfig(), 1)
+	m := New(src, format.DefaultConfig(), 1, false)
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 8})
 
 	// ngrid crashes on this path: __print calls write(line) with one argument
@@ -330,5 +330,132 @@ func TestQuitKey(t *testing.T) {
 	}
 	if !m.quit {
 		t.Error("q did not mark the model as quitting")
+	}
+}
+
+// fakeSource is a source that never finishes, standing in for a live pipe so
+// follow mode can be exercised without one.
+type fakeSource struct {
+	*source.CSV
+	all bool
+}
+
+func (f *fakeSource) Done() bool   { return false }
+func (f *fakeSource) RequestAll()  { f.all = true }
+func (f *fakeSource) StopAll()     { f.all = false }
+func (f *fakeSource) NumRows() int { return f.CSV.NumRows() }
+
+func newStreamModel(t *testing.T) (*Model, *fakeSource) {
+	t.Helper()
+	src, err := source.OpenCSV(strings.NewReader("n,x\n1,1.5\n2,2.5\n3,3.5\n"),
+		source.CSVOptions{Filename: "stream.csv", HasHeader: true, Config: format.DefaultConfig()})
+	if err != nil {
+		t.Fatalf("OpenCSV: %v", err)
+	}
+	t.Cleanup(func() { src.Close() })
+
+	// Ready signals coalesce, so wait on the deadline rather than on a count
+	// of wakeups.
+	src.RequestAll()
+	deadline := time.Now().Add(5 * time.Second)
+	for !src.Done() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out loading")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	f := &fakeSource{CSV: src}
+	m := New(f, format.DefaultConfig(), 1, false)
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 12})
+	m.refreshFormatters()
+	return m, f
+}
+
+// TestFollowToggle covers the mode 'f' holds open over a live stream: it names
+// itself in the status bar and keeps the source reading, and turning it off
+// stops that read rather than leaving a stream to be ingested for ever.
+func TestFollowToggle(t *testing.T) {
+	m, f := newStreamModel(t)
+
+	if got := strings.Join(lines(m), "\n"); strings.Contains(got, "FOLLOW") {
+		t.Error("FOLLOW shown before follow was asked for")
+	}
+
+	press(m, "f")
+	if !m.following {
+		t.Error("f did not enter follow mode")
+	}
+	if !f.all {
+		t.Error("follow did not ask the source to keep reading")
+	}
+	if got := strings.Join(lines(m), "\n"); !strings.Contains(got, "FOLLOW") {
+		t.Errorf("status bar does not show FOLLOW:\n%s", got)
+	}
+
+	press(m, "f")
+	if m.following {
+		t.Error("a second f did not leave follow mode")
+	}
+	if f.all {
+		t.Error("leaving follow did not stop the source reading")
+	}
+	if got := strings.Join(lines(m), "\n"); strings.Contains(got, "FOLLOW") {
+		t.Errorf("status bar still shows FOLLOW after leaving:\n%s", got)
+	}
+}
+
+// TestFollowLeftByAnyKey follows less: a keystroke that is not f still leaves
+// follow mode, and stops the read it started.
+func TestFollowLeftByAnyKey(t *testing.T) {
+	m, f := newStreamModel(t)
+
+	press(m, "f")
+	if !m.following || !f.all {
+		t.Fatal("f did not enter follow mode")
+	}
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.following {
+		t.Error("an arrow key left follow mode set")
+	}
+	if f.all {
+		t.Error("leaving follow by another key did not stop the read")
+	}
+}
+
+// TestSeekToEndKeepsLoading guards the distinction between follow and 'G': a
+// seek to the end of a file that is still loading is only unpinned by the next
+// keystroke, and the load carries on.
+func TestSeekToEndKeepsLoading(t *testing.T) {
+	m, f := newStreamModel(t)
+
+	press(m, "G")
+	if m.following {
+		t.Error("G entered follow mode; it should only pin the view")
+	}
+	if !f.all {
+		t.Fatal("G did not ask for the rest of the input")
+	}
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.followEnd {
+		t.Error("a keystroke did not release the pin")
+	}
+	if !f.all {
+		t.Error("a keystroke stopped a G seek from loading; it should carry on")
+	}
+}
+
+// TestFollowOnFinishedInputSaysSo covers 'f' where there is nothing to follow.
+func TestFollowOnFinishedInputSaysSo(t *testing.T) {
+	m := newModel(t, "n,x\n1,1.5\n2,2.5\n", 60, 12)
+
+	press(m, "f")
+	if m.following {
+		t.Error("entered follow mode on a fully loaded input")
+	}
+	if got := strings.Join(lines(m), "\n"); !strings.Contains(got, "no more rows to follow") {
+		t.Errorf("no explanation shown:\n%s", got)
 	}
 }

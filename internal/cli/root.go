@@ -31,6 +31,7 @@ type options struct {
 	comment    string
 	full       bool
 	fileFormat string
+	follow     bool
 }
 
 // dataExts are the file extensions grid knows how to read. Shell completion
@@ -50,8 +51,10 @@ func newCommand(o *options) *cobra.Command {
 		Short: "less for your data",
 		Long: "grid browses large tabular datasets in the terminal.\n\n" +
 			"It reads CSV (or another delimited format) from a file or standard\n" +
-			"input, or a Parquet file, and shows it in an interactive grid.\n" +
-			"Rows load as you scroll, so a huge file opens immediately.\n\n" +
+			"input (named either as - or by naming no file at all), or a Parquet\n" +
+			"file, and shows it in an interactive grid. Rows load as you scroll,\n" +
+			"so a huge file opens immediately, and a live stream displays as it\n" +
+			"arrives -- press f to follow it.\n\n" +
 			"Press h for help while running, and q to quit.",
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
@@ -68,6 +71,7 @@ func newCommand(o *options) *cobra.Command {
 	f.StringVarP(&o.comment, "comment", "c", "", "treat lines starting with PREFIX as comments")
 	f.BoolVar(&o.full, "full", false, "read all input before displaying, for better column sizing")
 	f.StringVar(&o.fileFormat, "format", "", "input format: csv or parquet (default: from the file extension)")
+	f.BoolVar(&o.follow, "follow", false, "start following new rows, as f does")
 
 	// The one positional argument is a data file, so offer the files grid can
 	// actually read. The candidates are built here rather than delegated to
@@ -188,8 +192,15 @@ func run(cmd *cobra.Command, args []string, o *options) error {
 	if len(args) > 0 {
 		path = args[0]
 	}
+	// '-' is the conventional name for standard input, and naming no file at
+	// all means the same thing. Settling it here keeps os.Open and the format
+	// sniffing from ever seeing a path that is not one.
+	fromStdin := path == "" || path == "-"
+	if fromStdin {
+		path = ""
+	}
 
-	if path == "" && isTerminal(os.Stdin) {
+	if fromStdin && isTerminal(os.Stdin) {
 		// Nothing piped in and no file named: there is nothing to show.
 		return cmd.Help()
 	}
@@ -203,7 +214,7 @@ func run(cmd *cobra.Command, args []string, o *options) error {
 	// When data arrives on stdin, the keyboard has to come from the terminal
 	// itself; ngrid reopened /dev/tty for the same reason.
 	var teaOpts []tea.ProgramOption
-	if path == "" {
+	if fromStdin {
 		tty, err := os.Open("/dev/tty")
 		if err != nil {
 			return fmt.Errorf("reading from a pipe needs a terminal for input: %w", err)
@@ -212,7 +223,7 @@ func run(cmd *cobra.Command, args []string, o *options) error {
 		teaOpts = append(teaOpts, tea.WithInput(tty))
 	}
 
-	model := ui.New(src, cfg, o.frozenCols)
+	model := ui.New(src, cfg, o.frozenCols, o.follow)
 	p := tea.NewProgram(model, teaOpts...)
 	if _, err := p.Run(); err != nil {
 		return err

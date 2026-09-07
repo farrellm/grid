@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -21,6 +22,30 @@ const DefaultChunkSize = 1024
 // readAhead is how far past the requested row the reader keeps going, matching
 // ngrid's SAMPLELINES lookahead.
 const readAhead = 200
+
+// sampleGrace bounds how long the sample waits for the rest of its lines once
+// the first has arrived. A file or a fast pipe fills the sample well inside it,
+// so nothing changes there; a live stream is cut short rather than holding the
+// display hostage until it has produced SampleSize lines. Inferring from fewer
+// rows is safe because ingest promotes a column the moment a value does not
+// fit.
+const sampleGrace = 250 * time.Millisecond
+
+// chunkGrace bounds how long a chunk waits for more lines before settling for
+// what has arrived, so rows already sitting in a pipe are displayed instead of
+// waiting on a chunk that may never fill.
+const chunkGrace = 50 * time.Millisecond
+
+// chunkResult reports what readChunk managed to do. Distinguishing a stream
+// that has merely paused from one that has ended is what keeps a live pipe from
+// being declared complete at its first quiet moment.
+type chunkResult int
+
+const (
+	chunkRows chunkResult = iota // rows were added to the store
+	chunkIdle                    // nothing available yet, but the input is open
+	chunkEOF                     // the input has ended
+)
 
 // CSVOptions configures a delimited-text source.
 type CSVOptions struct {
@@ -116,10 +141,19 @@ func OpenCSV(r io.Reader, opts CSVOptions) (*CSV, error) {
 // readSample pulls the head of the stream: enough lines to sniff a delimiter
 // and infer types from many rows rather than just the first.
 func (c *CSV) readSample() (*schema.Sample, error) {
+	// The first line is waited for without a deadline. A producer that thinks
+	// before it speaks -- a database query, say -- must still get a full sample
+	// once it starts, so the clock only begins when data does.
 	var raw []string
-	for len(raw) < c.opts.SampleSize+1 {
-		line, ok := c.lines.next()
-		if !ok {
+	if line, ok := c.lines.next(); ok {
+		raw = append(raw, line)
+	}
+	// From there the deadline is absolute rather than reset per line, so a
+	// steady trickle cannot extend the sample indefinitely.
+	deadline := time.Now().Add(sampleGrace)
+	for len(raw) > 0 && len(raw) < c.opts.SampleSize+1 {
+		line, ok, idle := c.lines.nextWithin(time.Until(deadline))
+		if idle || !ok {
 			break
 		}
 		raw = append(raw, line)
@@ -257,48 +291,76 @@ func (c *CSV) run() {
 			if !c.all.Load() && c.NumRows() >= target+readAhead {
 				break
 			}
-			more, err := c.readChunk()
+			res, err := c.readChunk()
 			if err != nil {
 				c.finish(err)
 				return
 			}
-			if !more {
+			switch res {
+			case chunkEOF:
 				c.finish(nil)
 				return
+			case chunkIdle:
+				// The producer has paused with the pipe still open. Block for
+				// the next line rather than spinning on it or mistaking the
+				// pause for the end of the input.
+				c.lines.wait()
 			}
 		}
 	}
 }
 
-// readChunk reads up to ChunkSize rows and adds them to the store.
-func (c *CSV) readChunk() (bool, error) {
+// readChunk reads up to ChunkSize rows and adds them to the store, settling for
+// fewer if the input goes quiet with rows in hand.
+func (c *CSV) readChunk() (chunkResult, error) {
 	// Track quote parity incrementally: a chunk may only end where we are
 	// outside a quoted field, so a value containing newlines is never split.
 	var raw []string
 	quotes := 0
+	eof := false
 	for len(raw) < c.opts.ChunkSize || quotes%2 != 0 {
-		line, ok := c.lines.next()
+		var (
+			line string
+			ok   bool
+			idle bool
+		)
+		if quotes%2 != 0 {
+			// Mid-way through a quoted value: the rest of it is still coming,
+			// and stopping here would tear the row in half. Wait it out.
+			line, ok = c.lines.next()
+		} else {
+			line, ok, idle = c.lines.nextWithin(chunkGrace)
+		}
+		if idle {
+			break
+		}
 		if !ok {
+			eof = true
 			break
 		}
 		quotes += strings.Count(line, `"`)
 		raw = append(raw, line)
 	}
 	if err := c.lines.err(); err != nil {
-		return false, err
+		return chunkEOF, err
 	}
 	if len(raw) == 0 {
-		return false, nil
+		if eof {
+			return chunkEOF, nil
+		}
+		return chunkIdle, nil
 	}
 
 	rows, err := schema.ParseRows(raw, c.opts.Delimiter)
 	if err != nil {
-		return false, err
+		return chunkEOF, err
 	}
 	if err := c.ingest(rows); err != nil {
-		return false, err
+		return chunkEOF, err
 	}
-	return true, nil
+	// Rows and the end of the input can arrive together; the next call sees the
+	// closed input and reports it, which costs one cheap extra pass.
+	return chunkRows, nil
 }
 
 // Request asks that at least n rows be loaded and returns immediately.
@@ -316,6 +378,10 @@ func (c *CSV) RequestAll() {
 	c.all.Store(true)
 	c.poke()
 }
+
+// StopAll cancels a RequestAll, returning to demand-driven reading. Leaving
+// follow mode uses it so a live stream is not ingested for ever.
+func (c *CSV) StopAll() { c.all.Store(false) }
 
 func (c *CSV) poke() {
 	select {
@@ -360,6 +426,9 @@ func (c *CSV) SetFormatter(col int, f format.Formatter) {
 func (c *CSV) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.stop)
+		// Release the reader if it is parked waiting on a stream that has gone
+		// quiet, so waiting for it below cannot deadlock.
+		c.lines.close()
 		<-c.finished // let the reader drop its reference to the batches
 	})
 	c.release()

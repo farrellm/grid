@@ -185,6 +185,9 @@ func (p *Parquet) RequestAll() {
 	p.poke()
 }
 
+// StopAll cancels a RequestAll, returning to demand-driven reading.
+func (p *Parquet) StopAll() { p.all.Store(false) }
+
 func (p *Parquet) poke() {
 	select {
 	case p.wake <- struct{}{}:

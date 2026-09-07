@@ -2,6 +2,7 @@ package source
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -387,5 +388,197 @@ func TestCSVCloseWhileLoading(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("Close() hung while the reader was running")
+	}
+}
+
+// waitFor polls until cond holds, so a streaming test can assert on rows that
+// arrive asynchronously without pinning down exactly when.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// openPipe starts a source over a pipe the test keeps open, the way a live
+// producer -- tail -f, a long-running query -- holds one open. A
+// strings.Reader cannot stand in: it is at EOF immediately, which is the one
+// case the blocking reads used to get right.
+func openPipe(t *testing.T, mut ...func(*CSVOptions)) (*CSV, *io.PipeWriter) {
+	t.Helper()
+	pr, pw := io.Pipe()
+	opts := CSVOptions{
+		Filename:  "stream.csv",
+		HasHeader: true,
+		Config:    format.DefaultConfig(),
+	}
+	for _, m := range mut {
+		m(&opts)
+	}
+
+	type result struct {
+		c   *CSV
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		c, err := OpenCSV(pr, opts)
+		done <- result{c, err}
+	}()
+
+	// The header and first rows go in while OpenCSV is sampling, and the write
+	// end stays open afterwards.
+	go func() {
+		fmt.Fprint(pw, "n,x,word\n")
+		for i := range 10 {
+			fmt.Fprintf(pw, "%d,%d.5,w%d\n", i, i, i)
+		}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("OpenCSV: %v", r.err)
+		}
+		t.Cleanup(func() { r.c.Close(); pw.Close() })
+		return r.c, pw
+	case <-time.After(10 * time.Second):
+		t.Fatal("OpenCSV blocked on a stream that had not ended")
+		return nil, nil
+	}
+}
+
+// TestCSVStreamDisplaysBeforeEOF is the pipe case: a producer that emits fewer
+// lines than the sample wants and then holds the pipe open must still open, and
+// must show the rows it did send rather than waiting for a chunk to fill.
+func TestCSVStreamDisplaysBeforeEOF(t *testing.T) {
+	c, _ := openPipe(t)
+
+	c.Request(10)
+	waitFor(t, "the rows already sent", func() bool { return c.NumRows() == 10 })
+
+	if c.Done() {
+		t.Error("Done() = true while the pipe is still open")
+	}
+	if got := c.NumCols(); got != 3 {
+		t.Errorf("NumCols() = %d, want 3", got)
+	}
+	// A short sample must still infer types, not fall back to text.
+	if v := c.Value(0, 0); v.Kind != format.KindInt {
+		t.Errorf("Value(0,0) = %+v, want an int", v)
+	}
+	if v := c.Value(3, 1); v.Kind != format.KindFloat || v.F != 3.5 {
+		t.Errorf("Value(3,1) = %+v, want float 3.5", v)
+	}
+}
+
+// TestCSVStreamGrows covers rows arriving after the view is already up.
+func TestCSVStreamGrows(t *testing.T) {
+	c, pw := openPipe(t)
+
+	c.RequestAll()
+	waitFor(t, "the first rows", func() bool { return c.NumRows() == 10 })
+
+	fmt.Fprint(pw, "10,10.5,w10\n11,11.5,w11\n")
+	waitFor(t, "rows sent later", func() bool { return c.NumRows() == 12 })
+
+	if c.Done() {
+		t.Error("Done() = true while the pipe is still open")
+	}
+	if v := c.Value(11, 2); v.Kind != format.KindString || v.S != "w11" {
+		t.Errorf("Value(11,2) = %+v, want \"w11\"", v)
+	}
+}
+
+// TestCSVStreamEndsAtEOF checks that a pause is distinguished from the end: the
+// source stays open through the quiet, and finishes only once it is closed.
+func TestCSVStreamEndsAtEOF(t *testing.T) {
+	c, pw := openPipe(t)
+
+	c.RequestAll()
+	waitFor(t, "the first rows", func() bool { return c.NumRows() == 10 })
+
+	// Long enough for several chunk deadlines to pass with nothing arriving.
+	time.Sleep(10 * chunkGrace)
+	if c.Done() {
+		t.Fatal("Done() = true after a pause in a stream that is still open")
+	}
+
+	pw.Close()
+	waitFor(t, "the end of the input", func() bool { return c.Done() })
+	if err := c.Err(); err != nil {
+		t.Errorf("Err() = %v, want nil", err)
+	}
+	if got := c.NumRows(); got != 10 {
+		t.Errorf("NumRows() = %d, want 10", got)
+	}
+}
+
+// TestCSVStreamQuotedNewline guards the one thing a partial flush must not do:
+// end a chunk inside a quoted value that is still arriving.
+func TestCSVStreamQuotedNewline(t *testing.T) {
+	c, pw := openPipe(t)
+	waitFor(t, "the first rows", func() bool { return c.NumRows() == 10 })
+
+	// The row opens a quote, then stalls mid-value.
+	fmt.Fprint(pw, "10,10.5,\"first\n")
+	time.Sleep(10 * chunkGrace)
+	c.RequestAll()
+	time.Sleep(10 * chunkGrace)
+
+	if n := c.NumRows(); n > 10 {
+		t.Fatalf("NumRows() = %d: a half-arrived quoted value was flushed", n)
+	}
+
+	fmt.Fprint(pw, "second\"\n")
+	waitFor(t, "the completed quoted value", func() bool { return c.NumRows() == 11 })
+
+	if v := c.Value(10, 2); v.Kind != format.KindString || v.S != "first\nsecond" {
+		t.Errorf("Value(10,2) = %+v, want \"first\\nsecond\"", v)
+	}
+}
+
+// TestCSVSlowStartKeepsFullSample pins the rule that the sample clock starts at
+// the first line, not at open: a producer that thinks for a while and then
+// delivers everything at once must still be typed from a full sample.
+func TestCSVSlowStartKeepsFullSample(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("n,x\n")
+	for i := range 200 {
+		// Only the last sampled row reveals the column is not an integer, so
+		// a short sample would type it Int64 and promote later.
+		if i == 99 {
+			b.WriteString("1,2.5\n")
+			continue
+		}
+		fmt.Fprintf(&b, "%d,%d\n", i, i)
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		time.Sleep(20 * sampleGrace)
+		io.WriteString(pw, b.String())
+		pw.Close()
+	}()
+
+	c, err := OpenCSV(pr, CSVOptions{
+		Filename:  "slow.csv",
+		HasHeader: true,
+		Config:    format.DefaultConfig(),
+	})
+	if err != nil {
+		t.Fatalf("OpenCSV: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	// Row 99 is inside the 100-row sample, so x is a float from the first
+	// batch on -- no promotion needed.
+	if v := c.Value(99, 1); v.Kind != format.KindFloat || v.F != 2.5 {
+		t.Errorf("Value(99,1) = %+v, want float 2.5: the sample was cut short", v)
 	}
 }
