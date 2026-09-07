@@ -89,22 +89,3 @@ func PromoteSchema(s *arrow.Schema, col int) (*arrow.Schema, bool) {
 	fields[col].Type = next
 	return arrow.NewSchema(fields, nil), true
 }
-
-// PromoteAll widens every column that is not already a string. It is the
-// fallback when a parse error cannot be attributed to one column.
-func PromoteAll(s *arrow.Schema) (*arrow.Schema, bool) {
-	fields := make([]arrow.Field, len(s.Fields()))
-	copy(fields, s.Fields())
-
-	changed := false
-	for i := range fields {
-		if next, ok := Promote(fields[i].Type); ok {
-			fields[i].Type = next
-			changed = true
-		}
-	}
-	if !changed {
-		return s, false
-	}
-	return arrow.NewSchema(fields, nil), true
-}

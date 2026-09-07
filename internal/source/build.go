@@ -1,15 +1,16 @@
 package source
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/farrellm/grid/internal/schema"
 )
 
 // parseError reports a value that did not fit its column's type, naming the
@@ -19,6 +20,12 @@ import (
 // numeric fields (so "1, 2" fails to parse as integers) and its error does not
 // say which column failed, leaving promotion no target. Building the arrays
 // directly keeps Arrow as the columnar store while giving both.
+// errNotBool is the one rejection appendValue raises itself; the rest come from
+// strconv and time. It is a package-level value because a failing cell is the
+// common case on the promotion path, where a whole column is rejected one value
+// at a time.
+var errNotBool = errors.New("not a boolean")
+
 type parseError struct {
 	Col   int
 	Value string
@@ -68,7 +75,7 @@ func appendValue(b array.Builder, cell string, nulls []string) error {
 		case "false":
 			bld.Append(false)
 		default:
-			return fmt.Errorf("not a boolean")
+			return errNotBool
 		}
 
 	case *array.Int64Builder:
@@ -86,14 +93,14 @@ func appendValue(b array.Builder, cell string, nulls []string) error {
 		bld.Append(v)
 
 	case *array.Date32Builder:
-		t, err := parseTime(s, dateLayouts)
+		t, err := schema.ParseTime(s, schema.DateLayouts)
 		if err != nil {
 			return err
 		}
 		bld.Append(arrow.Date32FromTime(t))
 
 	case *array.TimestampBuilder:
-		t, err := parseTime(s, timestampLayouts)
+		t, err := schema.ParseTime(s, schema.TimestampLayouts)
 		if err != nil {
 			return err
 		}
@@ -111,25 +118,4 @@ func appendValue(b array.Builder, cell string, nulls []string) error {
 		bld.AppendValueFromString(cell) //nolint:errcheck // best effort
 	}
 	return nil
-}
-
-// Layouts accepted when parsing, mirroring those the schema package infers.
-var (
-	dateLayouts      = []string{"2006-01-02", "20060102", "2006/01/02"}
-	timestampLayouts = []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05.999999999",
-	}
-)
-
-func parseTime(s string, layouts []string) (time.Time, error) {
-	for _, l := range layouts {
-		if t, err := time.Parse(l, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("not a timestamp")
 }

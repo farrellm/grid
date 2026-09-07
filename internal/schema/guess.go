@@ -9,6 +9,7 @@ package schema
 
 import (
 	"encoding/csv"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,11 +26,14 @@ var Delimiters = []rune{',', ' ', '|', '\t'}
 // become a float. Treating them as nulls keeps the column's real type.
 var DefaultNullValues = []string{"", "NA", "N/A", "na", "n/a", "NULL", "null", "NaN", "nan"}
 
-// Date and timestamp layouts accepted during inference. Arrow parses these
-// itself; we only need to recognise them.
+// DateLayouts and TimestampLayouts are the layouts a value may be written in to
+// be inferred as a date or a timestamp. They are exported because inference and
+// ingest must agree exactly: a value recognised here has to parse there, or a
+// column would be typed as temporal and then fail to build.
 var (
-	dateLayouts = []string{"2006-01-02", "20060102", "2006/01/02"}
-	timeLayouts = []string{
+	DateLayouts = []string{"2006-01-02", "20060102", "2006/01/02"}
+
+	TimestampLayouts = []string{
 		time.RFC3339Nano,
 		time.RFC3339,
 		"2006-01-02T15:04:05",
@@ -37,6 +41,21 @@ var (
 		"2006-01-02 15:04:05.999999999",
 	}
 )
+
+// ErrNotTime reports a value that matched none of the layouts offered.
+var ErrNotTime = errors.New("not a date or timestamp")
+
+// ParseTime returns the first of layouts that parses s, having trimmed the
+// surrounding space that a padded column leaves behind.
+func ParseTime(s string, layouts []string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	for _, l := range layouts {
+		if t, err := time.Parse(l, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, ErrNotTime
+}
 
 // GuessDelimiter picks the delimiter that splits every sample line into the
 // same, largest number of fields.
@@ -159,16 +178,11 @@ func isFloat(s string) bool {
 	return err == nil
 }
 
-func isDate(s string) bool { return matchesAny(s, dateLayouts) }
+func isDate(s string) bool { return matchesAny(s, DateLayouts) }
 
-func isTimestamp(s string) bool { return matchesAny(s, timeLayouts) }
+func isTimestamp(s string) bool { return matchesAny(s, TimestampLayouts) }
 
 func matchesAny(s string, layouts []string) bool {
-	s = strings.TrimSpace(s)
-	for _, l := range layouts {
-		if _, err := time.Parse(l, s); err == nil {
-			return true
-		}
-	}
-	return false
+	_, err := ParseTime(s, layouts)
+	return err == nil
 }

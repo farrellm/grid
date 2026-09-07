@@ -64,7 +64,7 @@ func (s *ColumnStats) Precision(cfg Config) int {
 	if !s.precisionOK {
 		return cfg.PrecisionMin
 	}
-	return clamp(cfg.PrecisionMin, s.precision, cfg.PrecisionMax)
+	return min(max(s.precision, cfg.PrecisionMin), cfg.PrecisionMax)
 }
 
 // minPrecision finds the fewest decimal places at which rounding x leaves a
@@ -96,14 +96,4 @@ func digitCount(x float64) int {
 		return 1
 	}
 	return max(int(math.Floor(math.Log10(x)+1)), 1)
-}
-
-func clamp(lo, v, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }

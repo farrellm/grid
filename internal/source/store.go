@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/farrellm/grid/internal/format"
 )
 
@@ -99,7 +98,7 @@ func (s *store) Value(row, col int) format.Value {
 	if !ok || col < 0 || col >= int(rec.NumCols()) {
 		return format.Null()
 	}
-	return valueAt(rec.Column(col), off)
+	return format.FromArrow(rec.Column(col), off)
 }
 
 func (s *store) release() {
@@ -111,67 +110,4 @@ func (s *store) release() {
 	s.chunks = nil
 	s.starts = nil
 	s.nrows = 0
-}
-
-// valueAt converts one element of an Arrow array into a format.Value.
-func valueAt(arr arrow.Array, i int) format.Value {
-	if arr == nil || i < 0 || i >= arr.Len() || arr.IsNull(i) {
-		return format.Null()
-	}
-	switch a := arr.(type) {
-	case *array.Boolean:
-		return format.Bool(a.Value(i))
-	case *array.Int8:
-		return format.Int(int64(a.Value(i)))
-	case *array.Int16:
-		return format.Int(int64(a.Value(i)))
-	case *array.Int32:
-		return format.Int(int64(a.Value(i)))
-	case *array.Int64:
-		return format.Int(a.Value(i))
-	case *array.Uint8:
-		return format.Int(int64(a.Value(i)))
-	case *array.Uint16:
-		return format.Int(int64(a.Value(i)))
-	case *array.Uint32:
-		return format.Int(int64(a.Value(i)))
-	case *array.Uint64:
-		return format.Int(int64(a.Value(i)))
-	case *array.Float16:
-		return format.Float(float64(a.Value(i).Float32()))
-	case *array.Float32:
-		return format.Float(float64(a.Value(i)))
-	case *array.Float64:
-		return format.Float(a.Value(i))
-	case *array.String:
-		return format.String(a.Value(i))
-	case *array.LargeString:
-		return format.String(a.Value(i))
-	case *array.Binary:
-		return format.String(string(a.Value(i)))
-	case *array.Date32:
-		return format.Time(a.Value(i).ToTime())
-	case *array.Date64:
-		return format.Time(a.Value(i).ToTime())
-	case *array.Timestamp:
-		unit := arrow.Microsecond
-		if tt, ok := a.DataType().(*arrow.TimestampType); ok {
-			unit = tt.Unit
-		}
-		return format.Time(a.Value(i).ToTime(unit))
-	case *array.Time32:
-		unit := arrow.Second
-		if tt, ok := a.DataType().(*arrow.Time32Type); ok {
-			unit = tt.Unit
-		}
-		return format.Time(a.Value(i).ToTime(unit))
-	case *array.Time64:
-		unit := arrow.Microsecond
-		if tt, ok := a.DataType().(*arrow.Time64Type); ok {
-			unit = tt.Unit
-		}
-		return format.Time(a.Value(i).ToTime(unit))
-	default:
-		return format.String(arr.ValueStr(i))
-	}
 }

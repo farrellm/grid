@@ -450,6 +450,9 @@ func (m *Model) refreshFormatters() {
 	}
 }
 
+// clamp is not min(max(v, lo), hi): an empty range, where hi < lo, collapses to
+// lo rather than to hi. moveToCol and move rely on that, since a table narrower
+// than the frozen columns leaves them with no scrolling column to land on.
 func clamp(lo, v, hi int) int {
 	if hi < lo {
 		return lo

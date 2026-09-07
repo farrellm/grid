@@ -31,7 +31,7 @@ func (m *Model) View() tea.View {
 		if rows >= m.height {
 			break
 		}
-		b.WriteString(truncateToWidth(line, m.width))
+		b.WriteString(clip(line, m.width))
 		b.WriteByte('\n')
 		rows++
 	}
@@ -138,7 +138,7 @@ func (m *Model) writeCells(b *strings.Builder, render func(int) (string, cellSty
 
 func (m *Model) writeFooter(b *strings.Builder) {
 	if m.mode == modeSearch {
-		b.WriteString(truncateToWidth(m.input.View(), m.width))
+		b.WriteString(clip(m.input.View(), m.width))
 		return
 	}
 
@@ -160,7 +160,7 @@ func (m *Model) writeFooter(b *strings.Builder) {
 		gap = 1
 	}
 	line := status + strings.Repeat(" ", gap) + value
-	m.pal.footer.write(b, truncateToWidth(line, m.width))
+	m.pal.footer.write(b, clip(line, m.width))
 }
 
 func (m *Model) statusText() string {
@@ -220,5 +220,3 @@ func clip(s string, width int) string {
 	}
 	return ansi.Truncate(s, width, "")
 }
-
-func truncateToWidth(s string, width int) string { return clip(s, width) }
