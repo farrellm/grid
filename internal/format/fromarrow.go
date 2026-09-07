@@ -82,10 +82,37 @@ func FromArrow(arr arrow.Array, i int) Value {
 }
 
 // Accumulate folds one Arrow array into the column's statistics.
+//
+// Every element of an Arrow array has the same type, so the two that dominate
+// real tables are dispatched once here rather than once per cell. The general
+// path below decides the same thing per element and gives the same answer; it
+// is what every other type takes.
 func (s *ColumnStats) Accumulate(arr arrow.Array, cfg Config) {
 	if arr == nil {
 		return
 	}
+	switch a := arr.(type) {
+	case *array.String:
+		for i := range a.Len() {
+			if a.IsNull(i) {
+				s.AddNull()
+			} else {
+				s.AddString(a.Value(i))
+			}
+		}
+		return
+
+	case *array.Float64:
+		for i := range a.Len() {
+			if a.IsNull(i) {
+				s.AddNull()
+			} else {
+				s.AddNumber(a.Value(i), cfg)
+			}
+		}
+		return
+	}
+
 	for i := range arr.Len() {
 		switch v := FromArrow(arr, i); v.Kind {
 		case KindNull:

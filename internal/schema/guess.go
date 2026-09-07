@@ -45,10 +45,10 @@ var (
 // ErrNotTime reports a value that matched none of the layouts offered.
 var ErrNotTime = errors.New("not a date or timestamp")
 
-// ParseTime returns the first of layouts that parses s, having trimmed the
-// surrounding space that a padded column leaves behind.
+// ParseTime returns the first of layouts that parses s. s must already be
+// trimmed: both callers have a trimmed string in hand, and trimming again here
+// would cost a pass over every temporal cell ingested.
 func ParseTime(s string, layouts []string) (time.Time, error) {
-	s = strings.TrimSpace(s)
 	for _, l := range layouts {
 		if t, err := time.Parse(l, s); err == nil {
 			return t, nil
@@ -183,6 +183,6 @@ func isDate(s string) bool { return matchesAny(s, DateLayouts) }
 func isTimestamp(s string) bool { return matchesAny(s, TimestampLayouts) }
 
 func matchesAny(s string, layouts []string) bool {
-	_, err := ParseTime(s, layouts)
+	_, err := ParseTime(strings.TrimSpace(s), layouts)
 	return err == nil
 }
