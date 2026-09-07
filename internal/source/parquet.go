@@ -50,25 +50,27 @@ func OpenParquet(ctx context.Context, r parquet.ReaderAtSeeker, opts ParquetOpti
 	if err != nil {
 		return nil, fmt.Errorf("reading parquet: %w", err)
 	}
+	// From here on the reader owns pf, so every failure closes it. The close
+	// error is discarded: the failure that got us here is the one to report.
 
 	mem := memory.NewGoAllocator()
 	fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{
 		BatchSize: opts.BatchSize,
 	}, mem)
 	if err != nil {
-		pf.Close()
+		_ = pf.Close()
 		return nil, fmt.Errorf("reading parquet: %w", err)
 	}
 
 	sch, err := fr.Schema()
 	if err != nil {
-		pf.Close()
+		_ = pf.Close()
 		return nil, fmt.Errorf("reading parquet schema: %w", err)
 	}
 
 	rr, err := fr.GetRecordReader(ctx, nil, nil)
 	if err != nil {
-		pf.Close()
+		_ = pf.Close()
 		return nil, fmt.Errorf("reading parquet: %w", err)
 	}
 

@@ -211,7 +211,7 @@ func run(ctx context.Context, cmd *cobra.Command, args []string, o *options) err
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// When data arrives on stdin, the keyboard has to come from the terminal
 	// itself; ngrid reopened /dev/tty for the same reason.
@@ -221,7 +221,7 @@ func run(ctx context.Context, cmd *cobra.Command, args []string, o *options) err
 		if err != nil {
 			return fmt.Errorf("reading from a pipe needs a terminal for input: %w", err)
 		}
-		defer tty.Close()
+		defer func() { _ = tty.Close() }()
 		teaOpts = append(teaOpts, tea.WithInput(tty))
 	}
 

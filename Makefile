@@ -80,14 +80,23 @@ fmt: ## format the source
 vet: ## run go vet
 	go vet ./...
 
+.PHONY: lint
+lint: ## run golangci-lint (see .golangci.yml)
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "golangci-lint is not installed; get it with"; \
+		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+		exit 1; }
+	golangci-lint run
+
 .PHONY: tidy
 tidy: ## tidy go.mod and go.sum
 	go mod tidy
 
 .PHONY: check
-check: ## everything CI should run: format check, vet, race tests
+check: ## everything CI runs: format check, vet, lint, race tests
 	@test -z "$$(gofmt -l .)" || { echo "unformatted files:"; gofmt -l .; exit 1; }
 	go vet ./...
+	$(MAKE) lint
 	go test -race ./...
 
 .PHONY: fixtures

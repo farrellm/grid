@@ -145,10 +145,23 @@ Run `make` for the full list of targets.
 make build        # build ./grid
 make install      # install it, with the version stamped from git
 make test         # run the tests
-make check        # what CI runs: format check, vet, race tests
+make lint         # run golangci-lint
+make check        # what CI runs: format check, vet, lint, race tests
 make run          # build, then browse testdata/sample.csv
 make fixtures     # regenerate testdata
 ```
+
+`grid` repaints the whole frame on every keystroke and every batch of rows
+that arrives, so rendering is a hot path and is benchmarked. To check a change
+against the current code:
+
+```
+git stash && make bench-old && git stash pop   # baseline
+make bench-new                                 # measure, then benchstat
+```
+
+`make bench-new` needs
+[benchstat](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat).
 
 The formatter tests in `internal/format` are a direct port of ngrid's
 `test/formatters.py`, with every expected string carried over unchanged; they
