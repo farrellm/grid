@@ -29,6 +29,7 @@ const (
 	modeNormal mode = iota
 	modeHelp
 	modeSearch
+	modeFilter
 )
 
 // rowsMsg reports that more rows have been loaded.
@@ -40,6 +41,11 @@ type Model struct {
 	cfg  format.Config
 	keys keyMap
 	pal  palette
+
+	// base is the source as opened. src is what the grid shows: base itself,
+	// or, while any filter is set, filter, the rows of base that pass.
+	base   source.Source
+	filter *filtered
 
 	width, height int
 
@@ -90,6 +96,7 @@ func New(src source.Source, cfg format.Config, numFrozen int, follow bool) *Mode
 
 	m := &Model{
 		src:        src,
+		base:       src,
 		cfg:        cfg,
 		keys:       defaultKeyMap(),
 		pal:        newPalette(),
@@ -125,7 +132,7 @@ func (m *Model) setFollow(on bool) {
 
 func (m *Model) Init() tea.Cmd {
 	m.src.Request(m.idx1)
-	return waitForRows(m.src)
+	return waitForRows(m.base)
 }
 
 // waitForRows blocks off the UI goroutine until the source reports progress.
@@ -145,17 +152,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case rowsMsg:
 		m.refreshFormatters()
-		if m.followEnd {
-			m.moveTo(m.src.NumRows() - m.numRows)
+		if m.filter != nil {
+			m.filter.scan(filterChunk)
 		}
-		m.clampToLoaded()
-		if m.src.Done() {
-			m.loading = false
-			m.following = false
-			m.followEnd = false
-			return m, nil
+		m.afterRows()
+		m.ensureLoaded()
+		// Whether to wait for more is the base's to say: with a filter set,
+		// the view is not done until the scan finishes too, but no more rows
+		// will arrive to wake a wait once the base is.
+		scan := m.scanFilter()
+		if m.base.Done() {
+			return m, scan
 		}
-		return m, waitForRows(m.src)
+		return m, tea.Batch(waitForRows(m.base), scan)
+
+	case filterMsg:
+		if msg.f != m.filter {
+			return m, nil // queued for a filter since cleared
+		}
+		m.filter.pending = false
+		m.filter.scan(filterChunk)
+		m.afterRows()
+		m.ensureLoaded()
+		return m, m.scanFilter()
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -171,6 +190,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case modeSearch:
 		return m.updateSearch(msg)
+	case modeFilter:
+		return m.updateFilter(msg)
 	}
 
 	// Any keystroke clears the previous message, so it stays readable through
@@ -282,6 +303,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.repeatSearch(+1, true)
 	case key.Matches(msg, k.PrevCol):
 		m.repeatSearch(-1, true)
+	case key.Matches(msg, k.Filter):
+		m.beginFilter()
 	}
 
 	return m, m.ensureLoaded()
@@ -293,6 +316,20 @@ func (m *Model) ensureLoaded() tea.Cmd {
 		m.src.Request(m.idx1)
 	}
 	return nil
+}
+
+// afterRows brings the view up to date with rows that have arrived, or that a
+// filter has let through.
+func (m *Model) afterRows() {
+	if m.followEnd {
+		m.moveTo(m.src.NumRows() - m.numRows)
+	}
+	m.clampToLoaded()
+	if m.src.Done() {
+		m.loading = false
+		m.following = false
+		m.followEnd = false
+	}
 }
 
 // setGeometry recomputes how many data rows fit, as ngrid's __set_geometry did

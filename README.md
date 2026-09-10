@@ -112,8 +112,34 @@ place, so a surprising value never breaks the display.
 | `/` `?` | Search forward / backward |
 | `n` `N` | Repeat the search |
 | `c` `C` | Search and scan to the matching column |
+| `&` | Filter rows by the column at the cursor |
 | `h` | Help |
 | `q` `Q` | Quit |
+
+### Filtering
+
+`&` shows only the rows whose value in the column at the cursor passes an
+expression, as `&` does for lines in less. It turns the cursor on if it is off.
+The expression is a comparison if it starts with an operator (`=`, `==`, `!=`,
+`<`, `<=`, `>`, `>=`), and a regular expression otherwise:
+
+```
+&^g                  values starting with g
+&> 2.5               greater than 2.5
+&>= 2024-01-05       on or after a date
+&= "a b"             exactly "a b"; quotes keep spaces and force text
+&=                   missing values (also &= NA); &!= for present ones
+&!^$                 a leading ! negates, as in less
+```
+
+Each cell is compared as its own type: numerically in a number column, in time
+order in a date column, and as text otherwise. A regular expression matches the
+full value, not the possibly elided text on screen. To search for a pattern
+that begins with an operator character, escape it: `&\=`.
+
+Filters stack: each `&` narrows the rows further, and the status bar lists
+them. An empty `&` clears them all. On a stream, rows are filtered as they
+arrive, and more of the input is read until the screen fills.
 
 ## Differences from ngrid
 

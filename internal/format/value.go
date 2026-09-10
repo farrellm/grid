@@ -2,6 +2,7 @@ package format
 
 import (
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -55,6 +56,30 @@ func (v Value) Truth() bool {
 		return !v.T.IsZero()
 	default:
 		return false
+	}
+}
+
+// Text renders any value as plain text, in full: no width, padding or elision.
+// A string column shows values that failed to parse as something narrower this
+// way, and a filter matches against it, so that what a filter keeps does not
+// depend on how wide its column is drawn.
+func Text(v Value) string {
+	switch v.Kind {
+	case KindNull:
+		return ""
+	case KindBool:
+		if v.B {
+			return "True"
+		}
+		return "False"
+	case KindInt:
+		return strconv.FormatInt(v.I, 10)
+	case KindFloat:
+		return strconv.FormatFloat(v.F, 'g', -1, 64)
+	case KindTime:
+		return v.T.Format(time.RFC3339)
+	default:
+		return v.S
 	}
 }
 

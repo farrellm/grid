@@ -1,9 +1,6 @@
 package format
 
 import (
-	"strconv"
-	"time"
-
 	"github.com/farrellm/grid/internal/textutil"
 )
 
@@ -32,29 +29,7 @@ func (f *StrFormatter) WithSize(size int) Formatter {
 
 func (f *StrFormatter) Format(v Value) string {
 	return textutil.Palide(
-		f.text(v), f.size,
+		Text(v), f.size,
 		textutil.Elide(f.ellipsis, f.size, "", 1.0),
 		f.pad, f.position, f.padLeft)
-}
-
-// text renders any value kind as a string, so a string column can still show
-// values that failed to parse as something narrower.
-func (f *StrFormatter) text(v Value) string {
-	switch v.Kind {
-	case KindNull:
-		return ""
-	case KindBool:
-		if v.B {
-			return "True"
-		}
-		return "False"
-	case KindInt:
-		return strconv.FormatInt(v.I, 10)
-	case KindFloat:
-		return strconv.FormatFloat(v.F, 'g', -1, 64)
-	case KindTime:
-		return v.T.Format(time.RFC3339)
-	default:
-		return v.S
-	}
 }
