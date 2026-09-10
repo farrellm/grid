@@ -51,7 +51,7 @@ func defaultKeyMap() keyMap {
 
 		Down:     key.NewBinding(key.WithKeys("down", "enter"), key.WithHelp("↓, RETURN", "forward one line")),
 		Up:       key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "backward one line")),
-		PageDown: key.NewBinding(key.WithKeys("pgdown", " "), key.WithHelp("PGDN, SPACE", "forward one window")),
+		PageDown: key.NewBinding(key.WithKeys("pgdown", "space"), key.WithHelp("PGDN, SPACE", "forward one window")),
 		PageUp:   key.NewBinding(key.WithKeys("pgup"), key.WithHelp("PGUP", "backward one window")),
 		HalfDown: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "forward one half-window")),
 		HalfUp:   key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "backward one half-window")),
