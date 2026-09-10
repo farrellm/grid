@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/farrellm/grid/internal/filter"
 )
 
 // benchCSV builds a wide, deterministic table: enough columns that a 200-column
@@ -137,6 +139,30 @@ func BenchmarkSearch(b *testing.B) {
 	}
 	if m.flash != "" {
 		b.Fatalf("search failed: %s", m.flash)
+	}
+}
+
+// BenchmarkFilter scans every loaded row through two stacked filters, a numeric
+// comparison and a regular expression, which is what applying a filter costs.
+func BenchmarkFilter(b *testing.B) {
+	m := newModel(b, benchCSV(2000, 20), 200, 50)
+	num, err := filter.Parse("> 500")
+	if err != nil {
+		b.Fatal(err)
+	}
+	re, err := filter.Parse("^word9")
+	if err != nil {
+		b.Fatal(err)
+	}
+	f := &filtered{Source: m.base, preds: []colPred{{col: 0, pred: num}, {col: 3, pred: re}}}
+	b.ReportAllocs()
+
+	for b.Loop() {
+		f.reset()
+		f.scan(filterChunk)
+	}
+	if f.NumRows() == 0 {
+		b.Fatal("nothing matched")
 	}
 }
 

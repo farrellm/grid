@@ -137,7 +137,7 @@ func (m *Model) writeCells(b *strings.Builder, render func(int) (string, cellSty
 }
 
 func (m *Model) writeFooter(b *strings.Builder) {
-	if m.mode == modeSearch {
+	if m.mode == modeSearch || m.mode == modeFilter {
 		b.WriteString(clip(m.input.View(), m.width))
 		return
 	}
@@ -190,12 +190,19 @@ func (m *Model) statusText() string {
 		// A '+' means more rows exist but have not been read, as in ngrid.
 		status += "+"
 	}
-	if m.following && !m.src.Done() {
+	if m.filter != nil {
+		// The count above is of the rows that pass.
+		status += " " + m.filter.String()
+	}
+	switch {
+	case m.following && !m.src.Done():
 		// Following is a mode the user is in, so it is named rather than
 		// described as activity; it subsumes the loading note.
 		status += " FOLLOW"
-	} else if m.loading && !m.src.Done() {
+	case m.loading && !m.src.Done():
 		status += " loading…"
+	case m.filter != nil && m.filter.unscanned():
+		status += " filtering…"
 	}
 	if err := m.src.Err(); err != nil {
 		status += " [" + err.Error() + "]"

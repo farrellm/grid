@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -412,6 +413,187 @@ func TestQuitKey(t *testing.T) {
 	}
 	if !m.quit {
 		t.Error("q did not mark the model as quitting")
+	}
+}
+
+// applyFilter moves the cursor to col and filters it by expr with '&'.
+func applyFilter(m *Model, col int, expr string) {
+	m.showCursor = true
+	m.move(0, col-m.cursor.col)
+	press(m, "&")
+	m.input.SetValue(expr)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+}
+
+// shown lists the values of one column across the rows the view holds.
+func shown(m *Model, col int) []string {
+	var got []string
+	for r := range m.src.NumRows() {
+		got = append(got, format.Text(m.src.Value(r, col)))
+	}
+	return got
+}
+
+func TestFilterPromptTurnsCursorOn(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+
+	press(m, "&")
+	if !m.showCursor {
+		t.Error("'&' did not turn the cursor on")
+	}
+	if m.mode != modeFilter {
+		t.Fatal("'&' did not open the filter prompt")
+	}
+	// The prompt names the column it will filter.
+	if footer := lines(m)[len(lines(m))-1]; !strings.HasPrefix(footer, "&n ") {
+		t.Errorf("footer = %q, want the prompt naming column n", footer)
+	}
+
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.mode != modeNormal || m.filter != nil {
+		t.Error("esc did not cancel the filter")
+	}
+}
+
+func TestFilterRegex(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 1, "^g")
+
+	if got := strings.Join(shown(m, 1), ","); got != "gamma" {
+		t.Fatalf("rows = %q, want only gamma", got)
+	}
+	got := lines(m)
+	if !strings.Contains(got[1], "gamma") {
+		t.Errorf("first row = %q, want gamma", got[1])
+	}
+	if !strings.HasPrefix(strings.TrimSpace(got[2]), "~") {
+		t.Errorf("second row = %q, want the '~' past the end", got[2])
+	}
+	footer := got[len(got)-1]
+	for _, want := range []string{"/1", "[word /^g/]", "%"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer = %q, want %q", footer, want)
+		}
+	}
+}
+
+func TestFilterComparison(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 2, "> 2.5")
+
+	if got := strings.Join(shown(m, 2), ","); got != "3.5,4.5" {
+		t.Errorf("rows = %q, want 3.5,4.5", got)
+	}
+}
+
+func TestFilterNegates(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 1, "!^[ab]")
+
+	if got := strings.Join(shown(m, 1), ","); got != "gamma,delta" {
+		t.Errorf("rows = %q, want gamma,delta", got)
+	}
+}
+
+func TestFiltersStack(t *testing.T) {
+	m := newModel(t, sample, 80, 8)
+	applyFilter(m, 1, "^[abg]")
+	applyFilter(m, 0, ">= 2")
+
+	if got := strings.Join(shown(m, 1), ","); got != "beta,gamma" {
+		t.Errorf("rows = %q, want beta,gamma", got)
+	}
+	if footer := lines(m)[len(lines(m))-1]; !strings.Contains(footer, "[word /^[abg]/, n >=2]") {
+		t.Errorf("footer = %q, want both filters listed", footer)
+	}
+}
+
+func TestBadFilterIsReported(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 0, "< NA")
+
+	if !strings.Contains(m.flash, "Bad filter") {
+		t.Errorf("flash = %q, want a bad-filter message", m.flash)
+	}
+	if m.filter != nil || m.src.NumRows() != 4 {
+		t.Error("a bad filter was applied")
+	}
+}
+
+// Clearing the filters keeps the cursor on the row it was on, which has a
+// different index among all the rows than among the filtered ones.
+func TestClearFilterKeepsRow(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 1, "^[gd]")
+	m.move(1, 0) // delta, row 1 filtered and row 3 in all
+
+	applyFilter(m, 1, "")
+	if m.filter != nil || m.src.NumRows() != 4 {
+		t.Fatalf("an empty filter left %d rows, want all 4", m.src.NumRows())
+	}
+	if m.cursor.row != 3 {
+		t.Errorf("cursor row = %d, want 3 (delta)", m.cursor.row)
+	}
+	if footer := lines(m)[len(lines(m))-1]; !strings.Contains(footer, "delta") {
+		t.Errorf("footer = %q, want the cursor still on delta", footer)
+	}
+}
+
+func TestSearchWithinFilter(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 1, "^[gd]")
+
+	press(m, "/", "d", "e", "l")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.cursor.row != 1 {
+		t.Errorf("cursor row = %d, want 1, delta's row among the filtered", m.cursor.row)
+	}
+}
+
+// A filter over more rows than one chunk finishes the scan through filterMsg,
+// between keystrokes, and counts every match.
+func TestFilterScansInChunks(t *testing.T) {
+	const n = 2*filterChunk + 10
+	var b strings.Builder
+	b.WriteString("n\n")
+	for i := range n {
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	m := newModel(t, b.String(), 60, 8)
+
+	applyFilter(m, 0, "0$")
+	if m.src.Done() {
+		t.Fatal("one chunk scanned everything; the test needs more rows")
+	}
+	if footer := lines(m)[len(lines(m))-1]; !strings.Contains(footer, "filtering…") {
+		t.Errorf("footer = %q, want it to say the scan is under way", footer)
+	}
+
+	for i := 0; !m.src.Done(); i++ {
+		if i > n/filterChunk+1 {
+			t.Fatal("scan did not finish")
+		}
+		m.Update(filterMsg{m.filter})
+	}
+	// The multiples of ten below n.
+	if got, want := m.src.NumRows(), (n+9)/10; got != want {
+		t.Errorf("rows = %d, want %d", got, want)
+	}
+}
+
+// A filterMsg queued before the filters were cleared must not touch the next
+// filter, which has a scan of its own.
+func TestStaleFilterMsgIgnored(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	applyFilter(m, 1, "^g")
+	stale := filterMsg{m.filter}
+	applyFilter(m, 1, "")
+	applyFilter(m, 1, "^a")
+
+	m.Update(stale)
+	if got := strings.Join(shown(m, 1), ","); got != "alpha" {
+		t.Errorf("rows = %q, want alpha", got)
 	}
 }
 

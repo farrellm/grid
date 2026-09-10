@@ -42,6 +42,7 @@ type keyMap struct {
 	PrevMatch  key.Binding
 	NextCol    key.Binding
 	PrevCol    key.Binding
+	Filter     key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -87,6 +88,9 @@ func defaultKeyMap() keyMap {
 		PrevMatch:  key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "repeat search backward")),
 		NextCol:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "forward, scan to column")),
 		PrevCol:    key.NewBinding(key.WithKeys("C"), key.WithHelp("C", "backward, scan to column")),
+		// less's "&pattern" shows only the matching lines; here the pattern
+		// applies to the column at the cursor.
+		Filter: key.NewBinding(key.WithKeys("&"), key.WithHelp("&expr", "filter rows by column")),
 	}
 }
 
@@ -109,6 +113,7 @@ func (k keyMap) sections() []helpSection {
 		}},
 		{"SEARCHING", []key.Binding{
 			k.SearchFwd, k.SearchBack, k.NextMatch, k.PrevMatch, k.NextCol, k.PrevCol,
+			k.Filter,
 		}},
 	}
 }
