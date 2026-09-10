@@ -151,6 +151,36 @@ func TestCursorMovementAndCellReadout(t *testing.T) {
 	}
 }
 
+// Esc hides the cursor but never shows it, and in a prompt it cancels the
+// prompt first, so each press backs out one level.
+func TestEscHidesCursor(t *testing.T) {
+	m := newModel(t, sample, 60, 8)
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+
+	press(m, "~")
+	m.Update(esc)
+	if m.showCursor {
+		t.Fatal("esc did not hide the cursor")
+	}
+	m.Update(esc)
+	if m.showCursor {
+		t.Fatal("esc with the cursor off turned it on")
+	}
+
+	press(m, "&")
+	m.Update(esc)
+	if m.mode != modeNormal {
+		t.Fatal("esc did not close the filter prompt")
+	}
+	if !m.showCursor {
+		t.Fatal("esc in the prompt also hid the cursor")
+	}
+	m.Update(esc)
+	if m.showCursor {
+		t.Error("a second esc did not hide the cursor")
+	}
+}
+
 func TestWidthAndPrecisionKeys(t *testing.T) {
 	m := newModel(t, sample, 60, 8)
 	press(m, "~")
