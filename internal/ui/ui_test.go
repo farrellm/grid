@@ -394,6 +394,16 @@ func TestPastEndOfDataShowsTilde(t *testing.T) {
 	}
 }
 
+// Bubble Tea names the space bar "space", not " ", so a binding spelled with a
+// literal space never matches.
+func TestSpacePagesDown(t *testing.T) {
+	m := newModel(t, "n\n"+strings.Repeat("1\n", 50), 40, 8)
+	press(m, " ")
+	if m.idx0 != m.numRows {
+		t.Errorf("top row = %d, want %d (space should page down like PGDN)", m.idx0, m.numRows)
+	}
+}
+
 func TestQuitKey(t *testing.T) {
 	m := newModel(t, sample, 40, 8)
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
