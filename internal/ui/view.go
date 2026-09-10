@@ -77,7 +77,7 @@ func (m *Model) writeHeader(b *strings.Builder) {
 			if c < len(names) {
 				name = names[c]
 			}
-			w := m.fmts[c].Width()
+			w := m.display[c].Width()
 			// Header names elide near the right but keep their tail, so
 			// similar prefixes stay distinguishable.
 			text := textutil.Palide(name, w, m.ellipsisFor(w), ' ', 0.7, true)
@@ -94,12 +94,12 @@ func (m *Model) writeRow(b *strings.Builder, idx int) {
 			var text string
 			switch {
 			case loaded:
-				text = m.fmts[c].Format(m.src.Value(idx, c))
+				text = m.display[c].Format(m.src.Value(idx, c))
 			case c == 0:
 				// Past the end of the data, as less marks empty lines.
-				text = textutil.Pad("~", m.fmts[c].Width(), ' ', false)
+				text = textutil.Pad("~", m.display[c].Width(), ' ', false)
 			default:
-				text = strings.Repeat(" ", m.fmts[c].Width())
+				text = strings.Repeat(" ", m.display[c].Width())
 			}
 			atCursor := m.showCursor && (idx == m.cursor.row || c == m.cursor.col)
 			atSelect := m.showCursor && idx == m.cursor.row && c == m.cursor.col
@@ -118,7 +118,7 @@ func (m *Model) writeRow(b *strings.Builder, idx int) {
 func (m *Model) writeCells(b *strings.Builder, render func(int) (string, cellStyle), sep func(int) cellStyle) {
 	x := 0
 	for _, c := range m.visibleColumns() {
-		if c >= len(m.fmts) || x >= m.width {
+		if c >= len(m.display) || x >= m.width {
 			return
 		}
 
@@ -148,7 +148,7 @@ func (m *Model) writeFooter(b *strings.Builder) {
 	// may have elided it.
 	value := ""
 	if m.showCursor && m.cursor.row < m.src.NumRows() && m.cursor.col < m.src.NumCols() {
-		raw := m.fmts[m.cursor.col].Format(m.src.Value(m.cursor.row, m.cursor.col))
+		raw := m.display[m.cursor.col].Format(m.src.Value(m.cursor.row, m.cursor.col))
 		room := m.width - textutil.Width(status) - 4
 		if room > 0 {
 			value = textutil.Elide(strings.TrimSpace(raw), room, m.cfg.Ellipsis, 1.0)

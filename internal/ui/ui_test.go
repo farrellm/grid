@@ -281,6 +281,81 @@ func TestHelpOverlay(t *testing.T) {
 	}
 }
 
+// The help is laid out to fit an 80x24 terminal. A binding added to the longer
+// column pushes the last line off the bottom, and a description too long for
+// its column loses its tail at the right edge; either is cut without warning.
+func TestHelpFitsTerminal(t *testing.T) {
+	m := newModel(t, sample, 80, 24)
+	press(m, "h")
+
+	out := ansi.Strip(m.View().Content)
+	want := []string{"Press any key when done."}
+	for _, sec := range m.keys.sections() {
+		for _, b := range sec.bindings {
+			want = append(want, b.Help().Desc)
+		}
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("help at 80x24 is missing %q:\n%s", w, out)
+		}
+	}
+}
+
+func TestExpandNamesToggle(t *testing.T) {
+	const name = "a_rather_long_name"
+	m := newModel(t, "n,"+name+"\n1,2\n", 60, 8)
+	before := m.fmts[1].Width()
+
+	if header := lines(m)[0]; strings.Contains(header, name) {
+		t.Fatalf("header = %q, want the long name elided before 'w'", header)
+	}
+
+	press(m, "w")
+	got := lines(m)
+	header, row := got[0], got[1]
+	at := strings.Index(header, name)
+	if at < 0 {
+		t.Fatalf("after 'w' header = %q, want the full name", header)
+	}
+	// The number stays right-aligned, now under the end of its name.
+	if end := strings.Index(row, "2") + 1; end != at+len(name) {
+		t.Errorf("value ends at column %d, want %d under the end of its name:\n%q\n%q",
+			end, at+len(name), header, row)
+	}
+	if got := m.fmts[1].Width(); got != before {
+		t.Errorf("'w' changed the column's own width to %d, want %d", got, before)
+	}
+
+	// Arriving rows rebuild the formatters; the mode has to survive that.
+	m.refreshFormatters()
+	if header := lines(m)[0]; !strings.Contains(header, name) {
+		t.Errorf("after a refresh header = %q, want the full name still", header)
+	}
+
+	press(m, "w")
+	if header := lines(m)[0]; strings.Contains(header, name) {
+		t.Errorf("after a second 'w' header = %q, want the name elided again", header)
+	}
+}
+
+// Widening to the names can take the columns past the edge of the terminal;
+// they must still clip rather than wrap.
+func TestExpandedViewNeverExceedsWidth(t *testing.T) {
+	long := "n," + strings.Repeat("a_column_with_a_very_long_name,", 5) +
+		"the_last_column_with_a_very_long_name\n1,2,3,4,5,6,7\n"
+
+	for _, w := range []int{20, 40, 80, 200} {
+		m := newModel(t, long, w, 10)
+		press(m, "w")
+		for i, l := range lines(m) {
+			if got := ansi.StringWidth(l); got > w {
+				t.Errorf("width %d: line %d is %d columns: %q", w, i, got, l)
+			}
+		}
+	}
+}
+
 func TestTitleLinesRender(t *testing.T) {
 	src, err := source.OpenCSV(context.Background(), strings.NewReader("# a note\nn,x\n1,2\n"), source.CSVOptions{
 		Filename:      "t.csv",

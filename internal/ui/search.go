@@ -147,10 +147,10 @@ func (m *Model) findFrom(start, dir int, toCol bool) {
 func (m *Model) matchRow(row, dir int) (int, bool) {
 	ncols := m.src.NumCols()
 	scan := func(c int) bool {
-		if c >= len(m.fmts) {
+		if c >= len(m.display) {
 			return false
 		}
-		return m.search.re.MatchString(m.fmts[c].Format(m.src.Value(row, c)))
+		return m.search.re.MatchString(m.display[c].Format(m.src.Value(row, c)))
 	}
 
 	if dir >= 0 {

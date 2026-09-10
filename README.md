@@ -105,6 +105,7 @@ place, so a surprising value never breaks the display.
 | `P` | First row and column |
 | `~` `INSERT` | Toggle the cell cursor |
 | `,` `.` | Narrow / widen the column at the cursor |
+| `w` | Toggle widening every column to show its full name |
 | `<` `>` | Less / more precision at the cursor |
 | `\|` | Cycle the column separator |
 | `H` `F` | Toggle the header / footer |
