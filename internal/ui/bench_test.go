@@ -75,6 +75,14 @@ func BenchmarkViewCursor(b *testing.B) {
 	benchView(b, m)
 }
 
+// Widened to their names, the numeric and time columns render through a
+// padding wrapper.
+func BenchmarkViewExpanded(b *testing.B) {
+	m := newModel(b, benchCSV(2000, 20), 200, 50)
+	press(m, "w")
+	benchView(b, m)
+}
+
 // A narrow terminal makes every cell clip, which is the expensive path through
 // writeCells.
 func BenchmarkViewNarrow(b *testing.B) {

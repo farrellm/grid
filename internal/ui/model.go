@@ -13,6 +13,7 @@ import (
 
 	"github.com/farrellm/grid/internal/format"
 	"github.com/farrellm/grid/internal/source"
+	"github.com/farrellm/grid/internal/textutil"
 )
 
 // cell names a position in the grid. It replaces a [2]int, where the two
@@ -54,6 +55,12 @@ type Model struct {
 
 	fmts       []format.Formatter
 	overridden []bool // columns whose width or precision the user has set
+	// display is what the grid renders with: fmts itself, or, while
+	// expandNames is on, a copy with every column widened to fit its name.
+	// fmts stays what the data and the user's adjustments make it, so turning
+	// the mode off puts every column back as it was.
+	display     []format.Formatter
+	expandNames bool
 
 	mode   mode
 	input  textinput.Model
@@ -252,6 +259,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.changeSize(-1)
 	case key.Matches(msg, k.Wider):
 		m.changeSize(+1)
+	case key.Matches(msg, k.ExpandNames):
+		m.expandNames = !m.expandNames
+		m.applyDisplay()
+		// The columns have changed width, which may have pushed the cursor's
+		// off the right edge.
+		m.move(0, 0)
 	case key.Matches(msg, k.LessPrec):
 		m.changePrecision(-1)
 	case key.Matches(msg, k.MorePrec):
@@ -301,14 +314,14 @@ func (m *Model) setGeometry() {
 func (m *Model) lastCol() int {
 	sep := len(m.cfg.Separator)
 	x := 0
-	for c := range min(m.numFrozen, len(m.fmts)) {
-		x += m.fmts[c].Width() + sep
+	for c := range min(m.numFrozen, len(m.display)) {
+		x += m.display[c].Width() + sep
 	}
 	for c := m.col0; c < m.src.NumCols(); c++ {
-		if c >= len(m.fmts) {
+		if c >= len(m.display) {
 			break
 		}
-		x += m.fmts[c].Width() + sep
+		x += m.display[c].Width() + sep
 		if x > m.width {
 			return max(c-1, m.col0)
 		}
@@ -437,6 +450,7 @@ func (m *Model) setFormatter(col int, f format.Formatter) {
 	m.fmts[col] = f
 	m.overridden[col] = true
 	m.src.SetFormatter(col, f)
+	m.applyDisplay()
 }
 
 // refreshFormatters picks up formatters resized by newly loaded data, leaving
@@ -447,12 +461,31 @@ func (m *Model) refreshFormatters() {
 		m.fmts = make([]format.Formatter, len(next))
 		m.overridden = make([]bool, len(next))
 		copy(m.fmts, next)
+	} else {
+		for i := range next {
+			if !m.overridden[i] {
+				m.fmts[i] = next[i]
+			}
+		}
+	}
+	m.applyDisplay()
+}
+
+// applyDisplay rebuilds the formatters the grid renders with from fmts. It is
+// run when they change rather than on every frame, since widening allocates.
+func (m *Model) applyDisplay() {
+	if !m.expandNames {
+		m.display = m.fmts
 		return
 	}
-	for i := range next {
-		if !m.overridden[i] {
-			m.fmts[i] = next[i]
+	// A slice of its own, so that widening never writes through into fmts.
+	names := m.src.Names()
+	m.display = make([]format.Formatter, len(m.fmts))
+	for c, f := range m.fmts {
+		if c < len(names) {
+			f = format.Widen(f, textutil.Width(names[c]))
 		}
+		m.display[c] = f
 	}
 }
 

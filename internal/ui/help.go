@@ -14,7 +14,8 @@ import (
 // with its keymap — it documented ',' and '<' as increasing what the code
 // decreased. Here it is generated from the bindings, so the two cannot
 // disagree. It is laid out in two columns to fit a 24-line terminal, which the
-// single column it inherited no longer did once search was added.
+// single column it inherited no longer did once search was added. Help and quit
+// sit under MOVING, which is the shorter column.
 func (m *Model) helpView() string {
 	var (
 		titleStyle = lipgloss.NewStyle().Bold(true)
@@ -22,11 +23,14 @@ func (m *Model) helpView() string {
 	)
 
 	sections := m.keys.sections()
-	left := renderSections(sections[1:2], titleStyle, keyStyle)                      // MOVING
-	right := renderSections(append(sections[2:], sections[0]), titleStyle, keyStyle) // the rest
+	left := renderSections([]helpSection{sections[1], sections[0]}, titleStyle, keyStyle) // MOVING, help and quit
+	right := renderSections(sections[2:], titleStyle, keyStyle)                           // the rest
 
+	// The left column is exactly as wide as its longest line; the right one
+	// brings its own indent as a gutter. Any wider and the longest lines on the
+	// right lose their last letter on an 80-column terminal.
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(42).Render(left),
+		lipgloss.NewStyle().Width(41).Render(left),
 		right)
 
 	out := titleStyle.Render("  SUMMARY OF GRID COMMANDS") + "\n\n" +

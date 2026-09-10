@@ -30,10 +30,11 @@ type keyMap struct {
 	ToggleHeader key.Binding
 	ToggleFooter key.Binding
 
-	Narrower key.Binding
-	Wider    key.Binding
-	LessPrec key.Binding
-	MorePrec key.Binding
+	Narrower    key.Binding
+	Wider       key.Binding
+	ExpandNames key.Binding
+	LessPrec    key.Binding
+	MorePrec    key.Binding
 
 	SearchFwd  key.Binding
 	SearchBack key.Binding
@@ -74,8 +75,11 @@ func defaultKeyMap() keyMap {
 		// opposite. The code's reading is the natural one, so it wins.
 		Narrower: key.NewBinding(key.WithKeys(","), key.WithHelp(",", "narrow column at cursor")),
 		Wider:    key.NewBinding(key.WithKeys("."), key.WithHelp(".", "widen column at cursor")),
-		LessPrec: key.NewBinding(key.WithKeys("<"), key.WithHelp("<", "less precision at cursor")),
-		MorePrec: key.NewBinding(key.WithKeys(">"), key.WithHelp(">", "more precision at cursor")),
+		// Unlike ',' and '.', this is every column at once, so it needs no
+		// cursor.
+		ExpandNames: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "toggle full column names")),
+		LessPrec:    key.NewBinding(key.WithKeys("<"), key.WithHelp("<", "less precision at cursor")),
+		MorePrec:    key.NewBinding(key.WithKeys(">"), key.WithHelp(">", "more precision at cursor")),
 
 		SearchFwd:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/pattern", "search forward")),
 		SearchBack: key.NewBinding(key.WithKeys("?"), key.WithHelp("?pattern", "search backward")),
@@ -101,7 +105,7 @@ func (k keyMap) sections() []helpSection {
 		}},
 		{"CURSOR & DISPLAY", []key.Binding{
 			k.CycleSep, k.ToggleHeader, k.ToggleFooter, k.ToggleCursor,
-			k.Narrower, k.Wider, k.LessPrec, k.MorePrec,
+			k.Narrower, k.Wider, k.ExpandNames, k.LessPrec, k.MorePrec,
 		}},
 		{"SEARCHING", []key.Binding{
 			k.SearchFwd, k.SearchBack, k.NextMatch, k.PrevMatch, k.NextCol, k.PrevCol,
