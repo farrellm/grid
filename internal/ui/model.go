@@ -267,6 +267,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, k.ToggleCursor):
 		m.showCursor = !m.showCursor
+	case key.Matches(msg, k.HideCursor):
+		m.showCursor = false
 	case key.Matches(msg, k.CycleSep):
 		m.cycleSeparator()
 	case key.Matches(msg, k.ToggleHeader):

@@ -26,6 +26,7 @@ type keyMap struct {
 	Follow   key.Binding
 
 	ToggleCursor key.Binding
+	HideCursor   key.Binding
 	CycleSep     key.Binding
 	ToggleHeader key.Binding
 	ToggleFooter key.Binding
@@ -68,6 +69,9 @@ func defaultKeyMap() keyMap {
 		Follow: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "follow rows as they arrive")),
 
 		ToggleCursor: key.NewBinding(key.WithKeys("~", "insert"), key.WithHelp("~, INSERT", "toggle cursor")),
+		// Several keys turn the cursor on for you; Esc is the way back out that
+		// needs no remembering. It only hides, so pressing it twice is harmless.
+		HideCursor:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("ESC", "hide cursor")),
 		CycleSep:     key.NewBinding(key.WithKeys("|"), key.WithHelp("|", "cycle column separator")),
 		ToggleHeader: key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "toggle header")),
 		ToggleFooter: key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "toggle footer")),
@@ -108,7 +112,7 @@ func (k keyMap) sections() []helpSection {
 			k.Left, k.Right, k.Top, k.Origin, k.End, k.LastRead, k.Follow,
 		}},
 		{"CURSOR & DISPLAY", []key.Binding{
-			k.CycleSep, k.ToggleHeader, k.ToggleFooter, k.ToggleCursor,
+			k.CycleSep, k.ToggleHeader, k.ToggleFooter, k.ToggleCursor, k.HideCursor,
 			k.Narrower, k.Wider, k.ExpandNames, k.LessPrec, k.MorePrec,
 		}},
 		{"SEARCHING", []key.Binding{
