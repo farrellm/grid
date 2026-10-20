@@ -128,7 +128,7 @@ func (m *Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if expr == "" {
 			m.clearFilter()
 			m.ensureLoaded()
-			return m, nil
+			return m, m.scanSort()
 		}
 		p, err := filter.Parse(expr)
 		if err != nil {
@@ -138,7 +138,7 @@ func (m *Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		col := m.cursor.col
 		m.addFilter(colPred{col: col, name: m.colName(col), pred: p})
 		m.ensureLoaded()
-		return m, m.scanFilter()
+		return m, tea.Batch(m.scanFilter(), m.scanSort())
 
 	case "esc", "ctrl+c":
 		m.mode = modeNormal
@@ -153,16 +153,16 @@ func (m *Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // addFilter narrows the view by one more filter and returns to the top, since
 // the rows on screen may be gone. The first chunk is scanned at once, so a
-// small input shows its result without waiting on the event loop.
+// small input shows its result without waiting on the event loop; the caller
+// starts placing the rows under any sort.
 func (m *Model) addFilter(p colPred) {
 	if m.filter == nil {
 		m.filter = &filtered{Source: m.base}
-		m.src = m.filter
 	}
 	m.filter.preds = append(m.filter.preds, p)
 	m.filter.reset()
 	m.filter.scan(filterChunk)
-	m.search.exhausted = false // its resume point indexed the old rows
+	m.rebuildView()
 	m.moveTo(0)
 	m.cursor.row = 0
 }
@@ -173,17 +173,11 @@ func (m *Model) clearFilter() {
 	if m.filter == nil {
 		return
 	}
-	offset := m.cursor.row - m.idx0
-	row := 0
-	if r := m.cursor.row; r < len(m.filter.rows) {
-		row = m.filter.rows[r]
-	}
-
-	m.filter = nil
-	m.src = m.base
-	m.search.exhausted = false
-	m.moveTo(row - offset)
-	m.cursor.row = clamp(0, row, m.maxRow())
+	m.keepRow(func() {
+		m.filter = nil
+		m.rebuildView()
+		m.scanSort()
+	})
 }
 
 // scanFilter queues the next chunk of the filter's scan, if loaded rows remain

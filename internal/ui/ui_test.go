@@ -627,6 +627,186 @@ func TestStaleFilterMsgIgnored(t *testing.T) {
 	}
 }
 
+// sortSample has ties in word and blanks in x, which sort last either way.
+const sortSample = "n,word,x\n1,b,2.5\n2,a,\n3,b,1.5\n4,a,3.5\n5,c,\n"
+
+// sortBy moves the cursor to col and presses 's' there.
+func sortBy(m *Model, col int, presses int) {
+	m.showCursor = true
+	m.move(0, col-m.cursor.col)
+	for range presses {
+		press(m, "s")
+	}
+}
+
+func footer(m *Model) string {
+	l := lines(m)
+	return l[len(l)-1]
+}
+
+func TestSortCycles(t *testing.T) {
+	m := newModel(t, sortSample, 80, 10)
+	m.showCursor = false
+	m.move(0, 2)
+	press(m, "s")
+	if !m.showCursor {
+		t.Error("'s' did not turn the cursor on")
+	}
+
+	for i, step := range []struct{ want, footer string }{
+		{"1.5,2.5,3.5,,", "sort[↑x]"},
+		{"3.5,2.5,1.5,,", "sort[↓x]"},
+		{"2.5,,1.5,3.5,", ""},
+	} {
+		if i > 0 {
+			press(m, "s")
+		}
+		if got := strings.Join(shown(m, 2), ","); got != step.want {
+			t.Errorf("x = %q, want %q", got, step.want)
+		}
+		if f := footer(m); step.footer != "" && !strings.Contains(f, step.footer) {
+			t.Errorf("footer = %q, want %q", f, step.footer)
+		}
+	}
+	if m.sort != nil {
+		t.Error("the third 's' left the column sorted")
+	}
+}
+
+// A column sorted afresh becomes the primary key, and the one sorted before it
+// breaks its ties.
+func TestSortsStack(t *testing.T) {
+	m := newModel(t, sortSample, 80, 10)
+	sortBy(m, 0, 2) // n, descending
+	sortBy(m, 1, 1) // word, ascending
+
+	if got := strings.Join(shown(m, 0), ","); got != "4,2,3,1,5" {
+		t.Errorf("n = %q, want 4,2,3,1,5", got)
+	}
+	if f := footer(m); !strings.Contains(f, "sort[↑word, ↓n]") {
+		t.Errorf("footer = %q, want both keys, word first", f)
+	}
+
+	// n was descending, so 's' on it again takes it out, and word's ties fall
+	// back to the order they were read in.
+	sortBy(m, 0, 1)
+	if got := strings.Join(shown(m, 0), ","); got != "2,4,1,3,5" {
+		t.Errorf("n = %q, want 2,4,1,3,5", got)
+	}
+	if f := footer(m); !strings.Contains(f, "sort[↑word]") {
+		t.Errorf("footer = %q, want only word left", f)
+	}
+}
+
+func TestClearSortKeepsRow(t *testing.T) {
+	m := newModel(t, sortSample, 80, 10)
+	sortBy(m, 2, 1)
+	m.move(1, 0) // 2.5: row 1 sorted and row 0 as read
+
+	press(m, "S")
+	if m.sort != nil || m.sortKeys != nil {
+		t.Fatal("'S' left a sort")
+	}
+	if m.cursor.row != 0 {
+		t.Errorf("cursor row = %d, want 0 (2.5)", m.cursor.row)
+	}
+}
+
+// A sort orders whatever the filters keep, and survives their changing.
+func TestSortOverFilter(t *testing.T) {
+	m := newModel(t, sortSample, 80, 10)
+	applyFilter(m, 1, "^[ab]")
+	sortBy(m, 2, 2)
+	if got := strings.Join(shown(m, 2), ","); got != "3.5,2.5,1.5," {
+		t.Errorf("x = %q, want 3.5,2.5,1.5,", got)
+	}
+
+	applyFilter(m, 0, "!= 4")
+	if got := strings.Join(shown(m, 2), ","); got != "2.5,1.5," {
+		t.Errorf("x = %q after another filter, want 2.5,1.5,", got)
+	}
+	if f := footer(m); !strings.Contains(f, "n !=4] sort[↓x]") {
+		t.Errorf("footer = %q, want the filters then the sort", f)
+	}
+
+	m.move(1, 0) // 1.5, n=3
+	applyFilter(m, 0, "")
+	if got := strings.Join(shown(m, 2), ","); got != "3.5,2.5,1.5,," {
+		t.Errorf("x = %q after clearing the filters, want every row sorted", got)
+	}
+	if got := format.Text(m.src.Value(m.cursor.row, 0)); got != "3" {
+		t.Errorf("cursor on n=%s, want it kept on 3", got)
+	}
+}
+
+// runSorts runs cmd and feeds any sortMsg it produces back to the model.
+func runSorts(m *Model, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			runSorts(m, c)
+		}
+	case sortMsg:
+		_, next := m.Update(msg)
+		runSorts(m, next)
+	}
+}
+
+func bigColumn(n int) string {
+	var b strings.Builder
+	b.WriteString("n\n")
+	for i := range n {
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// A sort of more than sortChunk rows runs off the UI goroutine, and the view
+// says so until its result arrives.
+func TestSortRunsInBackground(t *testing.T) {
+	const n = sortChunk + 10
+	m := newModel(t, bigColumn(n), 60, 8)
+	m.showCursor = true
+	press(m, "s")
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if m.src.Done() {
+		t.Fatal("the sort finished on the UI goroutine")
+	}
+	if f := footer(m); !strings.Contains(f, "sorting…") {
+		t.Errorf("footer = %q, want it to say the sort is under way", f)
+	}
+
+	runSorts(m, cmd)
+	if !m.src.Done() || m.src.NumRows() != n {
+		t.Fatalf("done = %v with %d rows, want all %d", m.src.Done(), m.src.NumRows(), n)
+	}
+	if got := format.Text(m.src.Value(0, 0)); got != strconv.Itoa(n-1) {
+		t.Errorf("first row = %s, want %d", got, n-1)
+	}
+}
+
+// A sort job finishing after its sort was replaced must not touch the new one.
+func TestStaleSortMsgIgnored(t *testing.T) {
+	const n = sortChunk + 10
+	m := newModel(t, bigColumn(n), 60, 8)
+	m.showCursor = true
+	_, stale := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+
+	runSorts(m, stale)
+	if m.src.NumRows() != 0 {
+		t.Fatal("a stale sort's rows were applied")
+	}
+	runSorts(m, cmd)
+	if got := format.Text(m.src.Value(0, 0)); got != strconv.Itoa(n-1) {
+		t.Errorf("first row = %s, want %d", got, n-1)
+	}
+}
+
 // fakeSource is a source that never finishes, standing in for a live pipe so
 // follow mode can be exercised without one.
 type fakeSource struct {

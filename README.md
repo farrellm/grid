@@ -115,6 +115,8 @@ place, so a surprising value never breaks the display.
 | `n` `N` | Repeat the search |
 | `c` `C` | Search and scan to the matching column |
 | `&` | Filter rows by the column at the cursor |
+| `s` | Sort by the column at the cursor: ascending, descending, off |
+| `S` | Clear sorting |
 | `h` | Help |
 | `q` `Q` | Quit |
 
@@ -142,6 +144,25 @@ that begins with an operator character, escape it: `&\=`.
 Filters stack: each `&` narrows the rows further, and the status bar lists
 them. An empty `&` clears them all. On a stream, rows are filtered as they
 arrive, and more of the input is read until the screen fills.
+
+### Sorting
+
+`s` sorts the rows by the column at the cursor, turning the cursor on if it is
+off. Pressing it again on that column reverses the order, and a third time
+takes the column out. Sorts stack: a column sorted afresh becomes the primary
+key and those sorted before it break its ties, so `s` on `date` and then on
+`name` orders by name, and by date within each name. Rows that still tie keep
+the order they were read in. The status bar lists the keys, primary first, as
+`sort[↑name, ↓date]`, and `S` clears them all, keeping the cursor on its row.
+
+Like `&`, a sort compares the value underneath, not the text on screen: numbers
+numerically, dates and times in time order, and text by its bytes. Missing
+values go last in either direction. A sort orders the rows that the filters
+keep, and changing the filters re-sorts.
+
+Sorting needs every row, so it reads the rest of the input, as `G` does. A
+large sort runs in the background while the status bar says `sorting…`, and on
+a stream, rows that arrive later are merged into place.
 
 ### Column formats
 

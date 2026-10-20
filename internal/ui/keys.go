@@ -45,6 +45,8 @@ type keyMap struct {
 	NextCol    key.Binding
 	PrevCol    key.Binding
 	Filter     key.Binding
+	Sort       key.Binding
+	ClearSort  key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -97,6 +99,11 @@ func defaultKeyMap() keyMap {
 		// less's "&pattern" shows only the matching lines; here the pattern
 		// applies to the column at the cursor.
 		Filter: key.NewBinding(key.WithKeys("&"), key.WithHelp("&expr", "filter rows by column")),
+		// One key cycles a column through ascending, descending and unsorted,
+		// as a spreadsheet's column heading does, so sorts stack as filters do.
+		// The help has one line left at 24 rows, so 'S' shares this entry.
+		Sort:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s S", "sort column / clear all")),
+		ClearSort: key.NewBinding(key.WithKeys("S")),
 	}
 }
 
@@ -121,7 +128,7 @@ func (k keyMap) sections() []helpSection {
 		}},
 		{"SEARCHING", []key.Binding{
 			k.SearchFwd, k.SearchBack, k.NextMatch, k.PrevMatch, k.NextCol, k.PrevCol,
-			k.Filter,
+			k.Filter, k.Sort,
 		}},
 	}
 }

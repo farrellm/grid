@@ -165,8 +165,7 @@ func (c compare) String() string { return c.tok + c.lit }
 
 func (c compare) Match(v format.Value) bool {
 	if c.missing {
-		missing := v.IsNull() || (v.Kind == format.KindFloat && math.IsNaN(v.F))
-		return missing == (c.op == opEq)
+		return v.IsMissing() == (c.op == opEq)
 	}
 	// A missing cell is unequal to every value, and not ordered against any.
 	if v.IsNull() {
@@ -187,22 +186,10 @@ func (c compare) Match(v format.Value) bool {
 	case v.Kind == format.KindTime && c.isTime:
 		res = v.T.Compare(c.t)
 	case v.Kind == format.KindBool && c.isBool:
-		res = compareBool(v.B, c.b)
+		res = format.CompareBool(v.B, c.b)
 	default:
 		// The literal cannot be read as the cell's kind, or the cell is text.
 		res = strings.Compare(format.Text(v), c.text)
 	}
 	return c.op.holds(res)
-}
-
-// compareBool orders false before true.
-func compareBool(a, b bool) int {
-	switch {
-	case a == b:
-		return 0
-	case b:
-		return -1
-	default:
-		return 1
-	}
 }
