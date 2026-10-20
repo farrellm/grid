@@ -19,7 +19,7 @@ func Widen(f Formatter, width int) Formatter {
 		return f.WithSize(width)
 	case *BoolFormatter:
 		return f.WithSize(width)
-	case *TimeFormatter:
+	case *TimeFormatter, *EpochFormatter:
 		return padded{Formatter: f, width: width}
 	}
 	// Numbers are right-aligned.

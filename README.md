@@ -108,6 +108,7 @@ place, so a surprising value never breaks the display.
 | `,` `.` | Narrow / widen the column at the cursor |
 | `w` | Toggle widening every column to show its full name |
 | `<` `>` | Less / more precision at the cursor |
+| `t` | Choose another format for the column at the cursor; again to restore |
 | `\|` | Cycle the column separator |
 | `H` `F` | Toggle the header / footer |
 | `/` `?` | Search forward / backward |
@@ -141,6 +142,26 @@ that begins with an operator character, escape it: `&\=`.
 Filters stack: each `&` narrows the rows further, and the status bar lists
 them. An empty `&` clears them all. On a stream, rows are filtered as they
 arrive, and more of the input is read until the screen fills.
+
+### Column formats
+
+`t` opens a menu of other ways to draw the column at the cursor, turning the
+cursor on if it is off. Pick one with `↑` `↓` and `RETURN`, or by its number;
+`ESC` leaves the column as it was. Pressing `t` on a column drawn that way puts
+it back, and the next `t` reopens the menu on the format chosen before.
+
+| Column | Formats |
+| --- | --- |
+| Numbers | UTC datetime, local datetime, percentage, scientific notation, thousands separators |
+| Dates and times | UTC datetime, local datetime, date only |
+
+The datetimes read a number as a Unix epoch time. Its unit comes from how many
+digits the column holds: up to 11 are seconds, then milliseconds to 14,
+microseconds to 17, and nanoseconds beyond, so a column of `1672531155` and one
+of JavaScript's `1672531155000` both read as `2022-12-31T23:59:15Z`. The
+percentage is rounded to a whole number, and `<` `>` change its precision as
+they do any number's. Search matches the column as it is drawn, but `&`
+compares the value underneath, so an epoch column is still filtered by number.
 
 ## Differences from ngrid
 
