@@ -201,6 +201,9 @@ func (m *Model) statusText() string {
 		// The count above is of the rows that pass.
 		status += " " + m.filter.String()
 	}
+	if m.sort != nil {
+		status += " " + m.sort.String()
+	}
 	switch {
 	case m.following && !m.src.Done():
 		// Following is a mode the user is in, so it is named rather than
@@ -210,6 +213,8 @@ func (m *Model) statusText() string {
 		status += " loading…"
 	case m.filter != nil && m.filter.unscanned():
 		status += " filtering…"
+	case m.sort != nil && m.sort.unsorted():
+		status += " sorting…"
 	}
 	if err := m.src.Err(); err != nil {
 		status += " [" + err.Error() + "]"

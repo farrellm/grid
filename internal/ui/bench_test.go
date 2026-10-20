@@ -166,6 +166,24 @@ func BenchmarkFilter(b *testing.B) {
 	}
 }
 
+// BenchmarkSort places every loaded row under two stacked keys, a text column
+// with many ties and a float, which is what sorting a small input costs.
+func BenchmarkSort(b *testing.B) {
+	m := newModel(b, benchCSV(2000, 20), 200, 50)
+	keys := []sortKey{{col: 3}, {col: 1, desc: true}}
+	n := m.base.NumRows()
+	b.ReportAllocs()
+
+	var s *sorted
+	for b.Loop() {
+		s = newSorted(m.base, m.base, nil, keys)
+		s.apply(s.place(nil, 0, n))
+	}
+	if s.NumRows() != n {
+		b.Fatalf("sorted %d rows, want %d", s.NumRows(), n)
+	}
+}
+
 func BenchmarkHelpView(b *testing.B) {
 	m := newModel(b, benchCSV(10, 5), 200, 50)
 	b.ReportAllocs()

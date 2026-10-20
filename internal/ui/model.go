@@ -7,6 +7,8 @@
 package ui
 
 import (
+	"slices"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -43,10 +45,13 @@ type Model struct {
 	keys keyMap
 	pal  palette
 
-	// base is the source as opened. src is what the grid shows: base itself,
-	// or, while any filter is set, filter, the rows of base that pass.
-	base   source.Source
-	filter *filtered
+	// base is the source as opened. src is what the grid shows: base, narrowed
+	// to the rows that pass while any filter is set, and reordered while any
+	// sort is. rebuildView assembles it.
+	base     source.Source
+	filter   *filtered
+	sort     *sorted
+	sortKeys []sortKey
 
 	width, height int
 
@@ -168,7 +173,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Whether to wait for more is the base's to say: with a filter set,
 		// the view is not done until the scan finishes too, but no more rows
 		// will arrive to wake a wait once the base is.
-		scan := m.scanFilter()
+		scan := tea.Batch(m.scanFilter(), m.scanSort())
 		if m.base.Done() {
 			return m, scan
 		}
@@ -182,7 +187,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filter.scan(filterChunk)
 		m.afterRows()
 		m.ensureLoaded()
-		return m, m.scanFilter()
+		return m, tea.Batch(m.scanFilter(), m.scanSort())
+
+	case sortMsg:
+		if msg.s != m.sort {
+			return m, nil // run for a sort since changed
+		}
+		m.sort.apply(msg.res)
+		m.afterRows()
+		m.ensureLoaded()
+		return m, m.scanSort()
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -319,6 +333,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.repeatSearch(-1, true)
 	case key.Matches(msg, k.Filter):
 		m.beginFilter()
+	case key.Matches(msg, k.Sort):
+		return m, tea.Batch(m.toggleSort(), m.ensureLoaded())
+	case key.Matches(msg, k.ClearSort):
+		m.clearSort()
 	}
 
 	return m, m.ensureLoaded()
@@ -330,6 +348,73 @@ func (m *Model) ensureLoaded() tea.Cmd {
 		m.src.Request(m.idx1)
 	}
 	return nil
+}
+
+// rebuildView assembles what the grid shows from the base, the filter and the
+// sort keys. A sort is rebuilt from scratch, since the rows under it may have
+// changed; its rows are placed by scanSort.
+func (m *Model) rebuildView() {
+	m.src = m.base
+	if m.filter != nil {
+		m.src = m.filter
+	}
+	m.sort = nil
+	if len(m.sortKeys) > 0 {
+		m.sort = newSorted(m.src, m.base, m.filter, m.sortKeys)
+		m.src = m.sort
+		m.src.RequestAll()
+	}
+	m.search.exhausted = false // its resume point indexed the old rows
+}
+
+// keepRow runs change, which rebuilds the view, keeping the cursor on the row
+// it was on and at the same height on the screen. A row the new view does not
+// hold yet, as when a large sort is still running, returns to the top.
+func (m *Model) keepRow(change func()) {
+	offset := m.cursor.row - m.idx0
+	row := m.baseRow(m.cursor.row)
+	change()
+	r := m.viewRow(row)
+	if r < 0 {
+		r, offset = 0, 0
+	}
+	m.moveTo(r - offset)
+	m.cursor.row = clamp(0, r, m.maxRow())
+}
+
+// baseRow maps a row of the view to the base row behind it, or -1.
+func (m *Model) baseRow(r int) int {
+	if m.sort != nil {
+		if r >= len(m.sort.rows) {
+			return -1
+		}
+		r = m.sort.rows[r]
+	}
+	if m.filter != nil {
+		if r < 0 || r >= len(m.filter.rows) {
+			return -1
+		}
+		r = m.filter.rows[r]
+	}
+	return r
+}
+
+// viewRow finds where the view shows a base row, or -1 if it does not.
+func (m *Model) viewRow(row int) int {
+	if row < 0 {
+		return -1
+	}
+	if m.filter != nil {
+		i, ok := slices.BinarySearch(m.filter.rows, row)
+		if !ok {
+			return -1
+		}
+		row = i
+	}
+	if m.sort != nil {
+		return slices.Index(m.sort.rows, row)
+	}
+	return row
 }
 
 // afterRows brings the view up to date with rows that have arrived, or that a
