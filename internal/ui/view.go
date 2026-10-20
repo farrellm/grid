@@ -53,6 +53,9 @@ func (m *Model) View() tea.View {
 	}
 
 	v.Content = strings.TrimRight(b.String(), "\n")
+	if m.mode == modeMenu {
+		v.Content = m.withMenu(v.Content)
+	}
 	return v
 }
 
@@ -139,6 +142,10 @@ func (m *Model) writeCells(b *strings.Builder, render func(int) (string, cellSty
 func (m *Model) writeFooter(b *strings.Builder) {
 	if m.mode == modeSearch || m.mode == modeFilter {
 		b.WriteString(clip(m.input.View(), m.width))
+		return
+	}
+	if m.mode == modeMenu {
+		m.pal.footer.write(b, clip(textutil.Pad("↑↓ choose  RETURN apply  ESC cancel", m.width, ' ', false), m.width))
 		return
 	}
 

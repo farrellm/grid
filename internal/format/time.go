@@ -19,6 +19,7 @@ var timeLayouts = map[string]string{
 // TimeFormatter renders timestamps with a fixed layout.
 type TimeFormatter struct {
 	layout  string
+	loc     *time.Location // nil renders each time in its own zone
 	nullStr string
 	width   int
 }
@@ -26,6 +27,11 @@ type TimeFormatter struct {
 // NewTime creates a formatter. The spec may be a name from timeLayouts or a Go
 // layout string.
 func NewTime(spec, nullStr string) *TimeFormatter {
+	return NewTimeIn(spec, nullStr, nil)
+}
+
+// NewTimeIn is NewTime rendering every time in loc.
+func NewTimeIn(spec, nullStr string, loc *time.Location) *TimeFormatter {
 	layout, ok := timeLayouts[spec]
 	if !ok {
 		layout = spec
@@ -37,7 +43,7 @@ func NewTime(spec, nullStr string) *TimeFormatter {
 	if w := textutil.Width(nullStr); w > width {
 		nullStr = textutil.Elide(nullStr, width, "", 1.0)
 	}
-	return &TimeFormatter{layout: layout, nullStr: nullStr, width: width}
+	return &TimeFormatter{layout: layout, loc: loc, nullStr: nullStr, width: width}
 }
 
 func (f *TimeFormatter) Width() int { return f.width }
@@ -46,5 +52,9 @@ func (f *TimeFormatter) Format(v Value) string {
 	if v.Kind != KindTime {
 		return textutil.Pad(f.nullStr, f.width, ' ', true)
 	}
-	return textutil.Palide(v.T.Format(f.layout), f.width, "", ' ', 1.0, false)
+	t := v.T
+	if f.loc != nil {
+		t = t.In(f.loc)
+	}
+	return textutil.Palide(t.Format(f.layout), f.width, "", ' ', 1.0, false)
 }

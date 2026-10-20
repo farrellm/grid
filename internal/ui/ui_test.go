@@ -753,3 +753,100 @@ func TestFollowOnFinishedInputSaysSo(t *testing.T) {
 		t.Errorf("no explanation shown:\n%s", got)
 	}
 }
+
+const epochs = "id,word,created_utc\n1,alpha,1672531155\n2,beta,1672617555\n"
+
+func TestAltFormatMenu(t *testing.T) {
+	m := newModel(t, epochs, 60, 8)
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight}) // created_utc
+
+	press(m, "t")
+	if !m.showCursor {
+		t.Error("'t' did not turn the cursor on")
+	}
+	if m.mode != modeMenu {
+		t.Fatal("'t' did not open the format menu")
+	}
+	if view := strings.Join(lines(m), "\n"); !strings.Contains(view, "UTC datetime") {
+		t.Fatalf("menu is not drawn:\n%s", view)
+	}
+
+	m.Update(enter)
+	if view := strings.Join(lines(m), "\n"); !strings.Contains(view, "2022-12-31T23:59:15Z") {
+		t.Fatalf("column is not drawn as a timestamp:\n%s", view)
+	}
+
+	press(m, "t")
+	if m.mode != modeNormal {
+		t.Fatal("'t' on an alternate format opened the menu instead of restoring")
+	}
+	if view := strings.Join(lines(m), "\n"); !strings.Contains(view, "1672531155") {
+		t.Fatalf("column is not restored:\n%s", view)
+	}
+
+	// The menu reopens on the choice made last time, and moves on from it.
+	press(m, "t")
+	if m.menu.alts[m.menu.sel].ID != "utc" {
+		t.Errorf("menu reopened on %q, want utc", m.menu.alts[m.menu.sel].ID)
+	}
+	press(m, "j")
+	m.Update(enter)
+	if got := m.altChoice[2]; got != "local" {
+		t.Errorf("choice = %q, want local", got)
+	}
+
+	// A digit picks directly.
+	press(m, "t", "t", "5")
+	if view := strings.Join(lines(m), "\n"); !strings.Contains(view, "1,672,531,155") {
+		t.Errorf("'5' did not pick thousands separators:\n%s", view)
+	}
+}
+
+func TestAltFormatMenuCancels(t *testing.T) {
+	m := newModel(t, epochs, 60, 8)
+	press(m, "~")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	before := m.fmts[2]
+
+	press(m, "t")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.mode != modeNormal || m.fmts[2] != before || m.orig[2] != nil {
+		t.Error("esc did not leave the column as it was")
+	}
+}
+
+func TestAltFormatOnText(t *testing.T) {
+	m := newModel(t, epochs, 60, 8)
+	press(m, "~")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight}) // word
+
+	press(m, "t")
+	if m.mode != modeNormal {
+		t.Fatal("'t' opened a menu for a text column")
+	}
+	if footer := lines(m)[len(lines(m))-1]; !strings.Contains(footer, "no other formats") {
+		t.Errorf("footer = %q, want the reason", footer)
+	}
+}
+
+// The menu stays inside the terminal, however small, and wherever the column.
+func TestAltFormatMenuFits(t *testing.T) {
+	for _, size := range [][2]int{{60, 8}, {30, 4}, {80, 24}} {
+		m := newModel(t, epochs, size[0], size[1])
+		m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+		m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+		press(m, "t")
+		got := lines(m)
+		if len(got) > size[1] {
+			t.Errorf("%dx%d: %d lines", size[0], size[1], len(got))
+		}
+		for _, l := range got {
+			if w := ansi.StringWidth(l); w > size[0] {
+				t.Errorf("%dx%d: line %q is %d wide", size[0], size[1], l, w)
+			}
+		}
+	}
+}

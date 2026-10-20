@@ -30,6 +30,7 @@ const (
 	modeHelp
 	modeSearch
 	modeFilter
+	modeMenu
 )
 
 // rowsMsg reports that more rows have been loaded.
@@ -67,10 +68,17 @@ type Model struct {
 	// the mode off puts every column back as it was.
 	display     []format.Formatter
 	expandNames bool
+	// orig holds, for each column showing an alternate format from the 't'
+	// menu, the formatter it replaced; nil when the column is drawn as loaded.
+	orig []format.Formatter
+	// altChoice remembers each column's last chosen alternate, by Alt.ID, so
+	// the menu reopens on it once the column has been toggled back.
+	altChoice []string
 
 	mode   mode
 	input  textinput.Model
 	search searchState
+	menu   menuState
 	flash  string
 
 	loading bool
@@ -192,6 +200,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.updateSearch(msg)
 	case modeFilter:
 		return m.updateFilter(msg)
+	case modeMenu:
+		return m.updateMenu(msg)
 	}
 
 	// Any keystroke clears the previous message, so it stays readable through
@@ -292,6 +302,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.changePrecision(-1)
 	case key.Matches(msg, k.MorePrec):
 		m.changePrecision(+1)
+	case key.Matches(msg, k.AltFormat):
+		m.toggleAlt()
 
 	case key.Matches(msg, k.SearchFwd):
 		m.beginSearch(+1)
@@ -499,6 +511,8 @@ func (m *Model) refreshFormatters() {
 	if len(m.fmts) != len(next) {
 		m.fmts = make([]format.Formatter, len(next))
 		m.overridden = make([]bool, len(next))
+		m.orig = make([]format.Formatter, len(next))
+		m.altChoice = make([]string, len(next))
 		copy(m.fmts, next)
 	} else {
 		for i := range next {

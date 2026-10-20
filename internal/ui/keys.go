@@ -36,6 +36,7 @@ type keyMap struct {
 	ExpandNames key.Binding
 	LessPrec    key.Binding
 	MorePrec    key.Binding
+	AltFormat   key.Binding
 
 	SearchFwd  key.Binding
 	SearchBack key.Binding
@@ -85,6 +86,7 @@ func defaultKeyMap() keyMap {
 		ExpandNames: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "toggle full column names")),
 		LessPrec:    key.NewBinding(key.WithKeys("<"), key.WithHelp("<", "less precision at cursor")),
 		MorePrec:    key.NewBinding(key.WithKeys(">"), key.WithHelp(">", "more precision at cursor")),
+		AltFormat:   key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "toggle format at cursor")),
 
 		SearchFwd:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/pattern", "search forward")),
 		SearchBack: key.NewBinding(key.WithKeys("?"), key.WithHelp("?pattern", "search backward")),
@@ -106,14 +108,16 @@ type helpSection struct {
 
 func (k keyMap) sections() []helpSection {
 	return []helpSection{
-		{"", []key.Binding{k.Help, k.Quit}},
+		// The header and footer toggles sit with help and quit, below MOVING,
+		// to keep the right-hand column of the help short enough for 24 lines.
+		{"", []key.Binding{k.Help, k.Quit, k.ToggleHeader, k.ToggleFooter}},
 		{"MOVING", []key.Binding{
 			k.Down, k.Up, k.PageDown, k.PageUp, k.HalfDown, k.HalfUp,
 			k.Left, k.Right, k.Top, k.Origin, k.End, k.LastRead, k.Follow,
 		}},
 		{"CURSOR & DISPLAY", []key.Binding{
-			k.CycleSep, k.ToggleHeader, k.ToggleFooter, k.ToggleCursor, k.HideCursor,
-			k.Narrower, k.Wider, k.ExpandNames, k.LessPrec, k.MorePrec,
+			k.CycleSep, k.ToggleCursor, k.HideCursor,
+			k.Narrower, k.Wider, k.ExpandNames, k.LessPrec, k.MorePrec, k.AltFormat,
 		}},
 		{"SEARCHING", []key.Binding{
 			k.SearchFwd, k.SearchBack, k.NextMatch, k.PrevMatch, k.NextCol, k.PrevCol,
